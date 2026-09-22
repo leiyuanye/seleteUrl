@@ -1,150 +1,115 @@
-# 企微单删 (qwdelete)
+# 链接检测 (linkcheck)
 
-基于 Android 无障碍服务 + MediaProjection 的企业微信客户批量单删工具，支持自动勾选、批量删除、定时任务等功能。
+基于 Android 无障碍服务的微信链接风险检测工具：逐个发送 TXT 中的链接到微信聊天，自动打开并扫描页面风险关键词（诱导分享、长按网址等），命中即弹窗提醒，结果保存到本地文件。
 
 ## 功能特性
 
 ### 核心功能
-- **批量单删客户**：自动识别并勾选企业微信"单删客户"列表中的复选框，批量删除单向联系人
-- **模板匹配检测**：通过截图 + 模板图像匹配精确定位复选框位置，不依赖控件树，适配 Android 15
-- **每轮4个策略**：每轮只勾选前4个复选框进行删除，确保勾选成功率
-- **定时任务**：支持设置定时执行批量删除任务，可添加多个时间点
-- **悬浮窗截图**：通过 MediaProjection 实现实时截图辅助功能
+- **TXT 批量链接检测**：在主页选择 TXT 文件（每行一条链接），逐条自动发送 → 打开 → 检测 → 返回，全程无需人工干预
+- **风险关键词扫描**：页面中出现「诱导分享」「长按网址」「已停止访问」「谨慎访问」「安全性」「存在风险」任一关键词即判定为风险链接，实时弹窗提醒
+- **进度实时显示**：悬浮球显示检测进度（如 `5/20`），随时点击「停止」中断
+- **结果文件**：每条链接的检测结果（正常/风险-关键词/发送失败/异常）追加保存到 `check_result.txt`
 
-### 界面主题
-- **默认风格**：清新简洁绿色风格
-- **手账风**：双击底部开发者名称切换为拼贴手账风格（马卡龙配色 + 贴纸卡片 + 胶带装饰）
-- 主题状态通过 MMKV 持久化，下次启动自动恢复
+### 界面
+- **卡片式主页**：悬浮窗、无障碍授权、检测文件选择、使用说明
+- **双主题**：默认清新绿色风格 / 手账风（双击底部开发者名称切换），状态持久化
 
 ### 技术特点
-- 使用 `GestureDescription` + `dispatchGesture()` 实现可靠的系统级点击
-- `isGesturing` 标志位防止手势执行期间被新命令打断
-- `_TapSync` 同步等待手势完成（300ms持续时间，800ms间隔）
-- 模板图片内嵌于 `res/drawable`，无外部文件依赖
-- `android:testOnly="false"` + `adbOptions { installOptions '-t' }` 避免安装问题
+- 基于 `GestureDescription` + `dispatchGesture()` 系统级手势模拟
+- 无障碍服务独立进程（`:BackgroundService`），主进程通过 `announceForAccessibility` + MMKV 与其通信
+- 节点递归遍历定位微信聊天输入框与链接消息，兼容微信 WebView 页面文本扫描
+- 极简依赖：Material + Jackson + MMKV，无网络权限
 
 ## 环境要求
 
-- Android Studio 2024.1.2+
-- JDK 8+
-- Android SDK 34（compileSdk 34, minSdk 24, targetSdk 34）
-- 测试设备：Android 7.0+（推荐 Android 12-15）
+- Android 7.0+（minSdk 24，targetSdk 34）
+- 已安装微信
+- 允许悬浮窗权限 + 开启无障碍服务
 
 ## 快速开始
 
 ### 编译构建
 
 ```bash
-# 克隆仓库
-git clone https://github.com/leiyuanye/qw-delete.git
-cd qw-delete
+git clone https://github.com/leiyuanye/seleteUrl.git
+cd seleteUrl
 
-# 使用 Android Studio 打开项目
-# 等待 Gradle Sync 完成
-# 点击 Build > Build APKs 生成安装包
-```
-
-或使用命令行构建：
-
-```bash
 # Windows
 gradlew.bat assembleDebug
-
-# Linux/Mac
-./gradlew assembleDebug
+# 生成 APK: AndroidDemo/build/outputs/apk/debug/AndroidDemo-debug.apk
 ```
 
-生成的 APK 位于 `AndroidDemo/build/outputs/apk/debug/`。
+或使用 Android Studio 打开项目，`Build → Build APK(s)`。
 
-### 安装部署
+### 安装
 
 ```bash
-# 通过 adb 安装（-t 允许测试包安装）
 adb install -t AndroidDemo/build/outputs/apk/debug/AndroidDemo-debug.apk
 ```
 
 ### 使用步骤
 
-1. **安装应用**后打开，首次启动会请求通知权限
-2. **授权悬浮窗**：点击"弹窗"卡片中的"显示"按钮，授权悬浮窗权限
-3. **开启无障碍服务**：点击"无障碍/已下载的服务"卡片中的"授权"按钮，在系统设置中找到"qwdelete模拟点击"并开启
-4. **添加定时任务**（可选）：点击"批量单删"卡片中的"+"按钮添加定时任务行，设置执行时间和脚本类型
-5. **启动定时任务**：点击"定时任务"卡片中的"启动"按钮
-6. **手动执行**：打开企业微信 > 通讯录 > 客户 > 单删客户列表，应用会自动勾选前4个客户并执行删除
+1. **准备 TXT 文件**：每行一条链接（`http://` 或 `https://` 开头），保存为 `.txt`
+2. **选择文件**：打开 App，点击「检测文件」卡片中的「选择」按钮，选中 TXT，卡片显示「已加载 N 条链接」
+3. **显示悬浮窗**：点击「悬浮窗」卡片中的「显示」按钮（首次需授权悬浮窗权限）
+4. **开启无障碍**：点击「无障碍/已下载的服务」卡片中的「授权」按钮，在系统设置中开启「链接检测模拟点击」
+5. **进入微信聊天**：手动打开微信，进入任意一个聊天界面（建议发给"文件传输助手"或自己的小号）
+6. **开始检测**：点击悬浮球「开始」——脚本将逐条发送链接、打开并检测，发现风险链接时弹窗提醒
+7. **查看结果**：检测完成后弹窗汇总；详细结果在 `Android/data/com.yaonan.qwdelete/files/check_result.txt`
+
+### 检测流程
+
+```
+读取TXT第N条链接 → 自动填入输入框 → 点击发送
+    → 等待消息出现 → 点击打开链接 → 等待页面加载
+    → 扫描页面文本中的风险关键词
+        → 命中：弹窗提醒 + 记录 [风险-关键词]
+        → 未命中：记录 [正常]
+    → 返回键回到聊天 → 处理下一条 → … → 汇总
+```
 
 ### 主题切换
 
-双击首页底部"生活就是敲敲敲"标签，可在默认风格和手账风之间切换。
+双击首页底部「生活就是敲敲敲」标签，在默认风格和手账风之间切换。
 
 ## 项目结构
 
 ```
-qw-delete/
-├── AndroidDemo/                    # 主模块
-│   ├── src/main/
-│   │   ├── AndroidManifest.xml     # 应用配置
-│   │   ├── java/com/
-│   │   │   ├── yaonan/             # 应用代码
-│   │   │   │   ├── activity/       # MainActivity 等
-│   │   │   │   ├── service/        # TimerService, MediaProjectionService
-│   │   │   │   └── util/           # 工具类
-│   │   │   └── google/android/     # 无障碍服务
-│   │   │       └── accessibility/
-│   │   │           └── selecttospeak/
-│   │   │               └── SelectToSpeakService.java  # 核心删除逻辑
-│   │   └── res/
-│   │       ├── drawable/           # 背景、图标、模板图片
-│   │       ├── layout/             # 布局文件
-│   │       ├── values/             # 颜色、样式、字符串
-│   │       └── xml/                # 无障碍服务配置
-│   └── build.gradle                # 模块构建配置
-├── build.gradle                    # 项目构建配置
-├── gradle.properties               # Gradle 属性
-├── testks-sign.gradle              # 签名配置
-└── testks.jks                      # 测试签名密钥
-```
-
-## 关键实现说明
-
-### 复选框检测（模板匹配）
-
-项目使用截图 + 模板匹配方式检测复选框，而非依赖无障碍节点树（Android 15 节点结构不稳定）：
-
-1. 通过 MediaProjection 获取当前屏幕截图
-2. 与内嵌模板 `checkbox_unchecked.png`（60x60 像素）进行逐像素匹配
-3. 像素差异小于 25 的区域判定为未勾选复选框
-4. 50 像素去重，避免重复检测同一位置
-
-### 手势执行
-
-```java
-// 同步等待手势完成，防止隔行点击
-_TapSync(x, y, 300, 800);  // x, y, 持续300ms, 间隔800ms
-
-// isGesturing 标志位防止手势执行期间新命令打断
-if (isGesturing) return;  // 跳过新命令
-```
-
-### 删除流程
-
-```
-截屏 → 模板匹配定位复选框 → 勾选前4个 → 点击删除按钮 → 确认删除 → 等待页面刷新 → 下一轮
+seleteUrl/
+├── AndroidDemo/                        # 主模块
+│   └── src/main/
+│       ├── AndroidManifest.xml         # 应用配置（仅悬浮窗权限）
+│       ├── java/com/
+│       │   ├── yaonan/
+│       │   │   ├── App.java            # Application 入口 + MMKV 初始化
+│       │   │   ├── activity/
+│       │   │   │   └── MainActivity.java       # 主界面（文件选择/授权/主题）
+│       │   │   ├── view/
+│       │   │   │   └── ScreenshotView.java     # 悬浮球 + 链接检测主循环
+│       │   │   └── util/               # 工具集（MMKV/线程/JSON/编解码等）
+│       │   └── google/android/accessibility/selecttospeak/
+│       │       └── SelectToSpeakService.java   # 核心无障碍服务（发送/检查命令）
+│       └── res/
+│           ├── layout/                 # 主界面、悬浮窗布局
+│           ├── values/                 # 颜色、样式、字符串
+│           └── xml/accessibility_config.xml    # 无障碍服务配置
+├── build.gradle                        # 项目构建配置
+├── README.md                           # 本文档
+└── DEVELOPMENT.md                      # 开发文档
 ```
 
 ## 技术依赖
 
-| 依赖 | 版本 | 用途 |
-|------|------|------|
-| Material Components | (libs version) | Material Design UI |
-| Jackson Databind | 2.22.2 | JSON 序列化 |
-| MMKV | 2.3.0 | 轻量级键值存储 |
+| 依赖 | 用途 |
+|------|------|
+| Material Components | Material Design UI |
+| Jackson Databind 2.22.2 | JSON 序列化 |
+| MMKV 2.3.0 | 跨进程键值存储（命令应答通道） |
 
 ## 注意事项
 
-- 每次 APK 更新后，需在系统设置中**手动重启无障碍服务**（关闭再开启）才能加载新代码
-- 本工具仅用于管理企业微信客户列表，请遵守企业微信使用规范
-- 签名密钥 `testks.jks` 为测试密钥，生产环境请替换为自己的签名
-
-## 下载链接
-
-[qw-delete6.4](https://1739961.share.123pan.cn/123pan/Lra9-A9g2h?pwd=3434#)
+- 每次 APK 更新后，需在系统设置中**关闭再开启无障碍服务**才能加载新代码
+- 检测期间请保持手机亮屏、停留在微信聊天界面，勿切走
+- 发送目标建议使用文件传输助手或自己的小号，避免打扰他人
+- 本工具仅用于检测自己拥有的链接在微信内的打开状态，请遵守微信使用规范
+- 签名密钥 `testks.jks` 为测试密钥，生产环境请替换
