@@ -155,42 +155,55 @@ public class SelectToSpeakService extends AccessibilityService {
      */
     private void sendLink(String url, String msgid) {
         try {
-            // 1、点击输入框聚焦（弹出键盘，确保粘贴目标就绪）
+            // 1、定位输入框
             AccessibilityNodeInfo editNode = findChatEditText();
             if (editNode == null) {
                 LogHelper.e(TAG, "发送链接失败: 未找到聊天输入框");
                 response(msgid, "error");
                 return;
             }
-            Rect boxRect = new Rect();
-            editNode.getBoundsInScreen(boxRect);
-            _Tap(boxRect.centerX(), boxRect.centerY(), 50L, null);
-            ThreadUtil.sleep(800);
 
-            // 2、粘贴剪贴板内容（控制端发送命令前已将链接写入剪贴板）
+            // 2、方式一：ACTION_FOCUS聚焦（不弹键盘、布局不变）+ 粘贴
             //    粘贴走微信原生输入管线，等价于真实输入，会触发"发送"按钮显示
-            editNode = findChatEditText();
-            if (editNode != null) {
-                editNode.performAction(AccessibilityNodeInfo.ACTION_PASTE);
-            }
+            editNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+            ThreadUtil.sleep(500);
+            boolean pasted = editNode.performAction(AccessibilityNodeInfo.ACTION_PASTE);
+            LogHelper.e(TAG, "粘贴动作: " + pasted);
             ThreadUtil.sleep(1000);
 
-            // 3、粘贴未生效时退回 SET_TEXT 方式
+            // 3、方式二：SET_TEXT直填
             if (!isInputFilled(url)) {
                 LogHelper.e(TAG, "粘贴未生效，退回SET_TEXT方式");
                 editNode = findChatEditText();
                 if (editNode != null) {
                     Bundle arguments = new Bundle();
                     arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, url);
-                    editNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
-                    ThreadUtil.sleep(300);
                     editNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments);
                     ThreadUtil.sleep(800);
                 }
             }
 
+            // 4、方式三：坐标点击聚焦（弹键盘）+ 重新定位 + 粘贴
             if (!isInputFilled(url)) {
-                LogHelper.e(TAG, "发送链接失败: 输入框未填入链接");
+                LogHelper.e(TAG, "SET_TEXT未生效，退回坐标点击+粘贴方式");
+                editNode = findChatEditText();
+                if (editNode != null) {
+                    Rect boxRect = new Rect();
+                    editNode.getBoundsInScreen(boxRect);
+                    _Tap(boxRect.centerX(), boxRect.centerY(), 50L, null);
+                    ThreadUtil.sleep(800);
+                    editNode = findChatEditText();
+                    if (editNode != null) {
+                        editNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+                        ThreadUtil.sleep(300);
+                        editNode.performAction(AccessibilityNodeInfo.ACTION_PASTE);
+                        ThreadUtil.sleep(1000);
+                    }
+                }
+            }
+
+            if (!isInputFilled(url)) {
+                LogHelper.e(TAG, "发送链接失败: 三种方式均未能填入链接");
                 response(msgid, "error");
                 return;
             }
@@ -467,7 +480,10 @@ public class SelectToSpeakService extends AccessibilityService {
     }
 
     /**
-     * 查找微信聊天输入框：递归遍历节点树，定位"只包含一个 EditText 子节点的 ScrollView"。
+     * 查找微信聊天输入框。
+     *
+     * <p>优先结构匹配：定位"只包含一个 EditText 子节点的 ScrollView"；
+     * 键盘弹出等场景布局变化时，退化为查找任意可编辑的 EditText（聊天界面中唯一）。</p>
      *
      * @return 输入框节点（未找到返回 null）
      */
@@ -479,6 +495,12 @@ public class SelectToSpeakService extends AccessibilityService {
                 if (editNode != null && (editNode.getClassName() + "").contains("EditText")) {
                     return editNode;
                 }
+            }
+        }
+        // 兜底：键盘弹出后输入栏结构变化，按"可编辑的EditText"特征查找（聊天界面中唯一）
+        for (AccessibilityNodeInfo node : nodes) {
+            if ((node.getClassName() + "").contains("EditText") && node.isEditable()) {
+                return node;
             }
         }
         return null;
