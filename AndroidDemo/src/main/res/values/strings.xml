@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">qwdelete6.3</string>
-    <string name="accessibility_tip">qwdelete模拟点击👉</string>
-    <string name="accessibility_desc">开启qwdelete模拟点击支持</string>
+    <string name="app_name">链接检测</string>
+    <string name="accessibility_tip">链接检测模拟点击👉</string>
+    <string name="accessibility_desc">开启链接检测模拟点击支持</string>
 </resources>

@@ -25,7 +25,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:text="企微单删"
+            android:text="链接检测"
             android:textColor="@color/text_primary"
             android:textSize="24sp"
             android:textStyle="bold" />
@@ -40,7 +40,7 @@
             android:textColor="@color/text_secondary"
             android:textSize="13sp" />
 
-        <!-- 卡片1：弹窗 -->
+        <!-- 卡片1：悬浮窗 -->
         <LinearLayout
             android:id="@+id/card_popup"
             android:layout_width="match_parent"
@@ -78,7 +78,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="12dp"
-                    android:text="弹窗"
+                    android:text="悬浮窗"
                     android:textColor="@color/text_primary"
                     android:textSize="15sp" />
             </LinearLayout>
@@ -150,9 +150,9 @@
                 android:text="授权" />
         </LinearLayout>
 
-        <!-- 卡片3：定时任务 -->
+        <!-- 卡片3：检测文件（TXT） -->
         <LinearLayout
-            android:id="@+id/card_timer"
+            android:id="@+id/card_file"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
@@ -170,159 +170,80 @@
                 android:layout_weight="1">
 
                 <FrameLayout
-                    android:id="@+id/icon_timer_bg"
+                    android:id="@+id/icon_file_bg"
                     android:layout_width="38dp"
                     android:layout_height="38dp"
                     android:background="@drawable/bg_icon_timer">
 
                     <ImageView
-                        android:id="@+id/icon_timer_img"
+                        android:id="@+id/icon_file_img"
                         android:layout_width="20dp"
                         android:layout_height="20dp"
                         android:layout_gravity="center"
                         android:src="@drawable/ic_timer" />
                 </FrameLayout>
 
-                <TextView
-                    android:id="@+id/tv_timer_title"
+                <LinearLayout
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="12dp"
-                    android:text="定时任务"
-                    android:textColor="@color/text_primary"
-                    android:textSize="15sp" />
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/tv_file_title"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="检测文件"
+                        android:textColor="@color/text_primary"
+                        android:textSize="15sp" />
+
+                    <TextView
+                        android:id="@+id/tv_file_count"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="未选择文件"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+                </LinearLayout>
             </LinearLayout>
 
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal">
-
-                <Button
-                    android:id="@+id/btn_start_timer"
-                    style="@style/BtnPrimary"
-                    android:text="启动" />
-
-                <Button
-                        android:id="@+id/btn_stop_timer"
-                        style="@style/BtnPrimary"
-                        android:layout_marginStart="8dp"
-                        android:text="停止" />
-            </LinearLayout>
+            <Button
+                android:id="@+id/btn_pick_file"
+                style="@style/BtnPrimary"
+                android:text="选择" />
         </LinearLayout>
 
-        <!-- 卡片4：批量单删 -->
+        <!-- 使用说明卡片 -->
         <LinearLayout
-            android:id="@+id/card_delete"
+            android:id="@+id/card_help"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:background="@drawable/bg_card"
-            android:padding="16dp"
-            android:layout_marginBottom="4dp"
-            android:elevation="1dp">
-
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_weight="1">
-
-                <FrameLayout
-                    android:id="@+id/icon_delete_bg"
-                    android:layout_width="38dp"
-                    android:layout_height="38dp"
-                    android:background="@drawable/bg_icon_delete">
-
-                    <ImageView
-                        android:id="@+id/icon_delete_img"
-                        android:layout_width="20dp"
-                        android:layout_height="20dp"
-                        android:layout_gravity="center"
-                        android:src="@drawable/ic_batch_delete" />
-                </FrameLayout>
-
-                <TextView
-                    android:id="@+id/tv_delete_title"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="12dp"
-                    android:text="批量单删"
-                    android:textColor="@color/text_primary"
-                    android:textSize="15sp" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal">
-
-                <Button
-                        android:id="@+id/btn_batch_minus"
-                        style="@style/BtnPrimary"
-                        android:text="−" />
-
-                <Button
-                        android:id="@+id/btn_batch_plus"
-                        style="@style/BtnPrimary"
-                        android:layout_marginStart="8dp"
-                        android:text="+" />
-            </LinearLayout>
-        </LinearLayout>
-
-        <!-- 卡片5：勾选方式 -->
-        <LinearLayout
-            android:id="@+id/card_mode"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
+            android:orientation="vertical"
             android:background="@drawable/bg_card"
             android:padding="16dp"
             android:layout_marginBottom="4dp"
             android:elevation="1dp">
 
             <TextView
-                android:id="@+id/tv_mode_title"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="勾选方式"
-                android:textColor="@color/text_primary"
-                android:textSize="15sp" />
-
-            <Spinner
-                android:id="@+id/spinner_check_mode"
+                android:id="@+id/tv_help_title"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:minWidth="110dp" />
-
-            <EditText
-                android:id="@+id/et_swipe_duration"
-                android:layout_width="wrap_content"
-                android:layout_height="32dp"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/bg_btn_disabled"
-                android:gravity="center"
-                android:hint="滑动ms"
-                android:inputType="number"
-                android:minWidth="72dp"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp"
+                android:text="使用说明"
                 android:textColor="@color/text_primary"
-                android:textColorHint="@color/text_secondary"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tv_help_content"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:lineSpacingExtra="4dp"
+                android:text="1、选择TXT文件（每行一条链接）\n2、显示悬浮窗，开启无障碍服务\n3、手动打开微信并进入聊天界面\n4、点击悬浮球「开始」自动检测\n5、发现风险链接时弹窗提醒\n结果保存在 check_result.txt"
+                android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
         </LinearLayout>
-
-        <!-- 定时任务动态行容器 -->
-        <LinearLayout
-            android:id="@+id/timer_rows"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_marginBottom="12dp" />
 
         <!-- 底部：版本号 + 开发者 -->
         <LinearLayout
@@ -339,7 +260,7 @@
             <Button
                     android:id="@+id/btn_about"
                     style="@style/BtnDisabled"
-                    android:text="qwdelete6.4" />
+                    android:text="linkcheck1.0" />
 
             <LinearLayout
                 android:layout_width="0dp"

@@ -6,55 +6,44 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.ColorStateList;
-import android.text.Editable;
-import android.text.TextWatcher;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.util.Log;
-import android.view.MotionEvent;
 import android.view.View;
-import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityManager;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
-import android.widget.EditText;
-import android.widget.LinearLayout;
-import android.widget.RelativeLayout;
-import android.widget.Spinner;
 
-import androidx.appcompat.app.AlertDialog;
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 
 import com.tencent.mmkv.MMKV;
+import com.yaonan.App;
 import com.yaonan.R;
 import com.yaonan.databinding.ActivityMainBinding;
-import com.yaonan.service.TimerService;
-import com.yaonan.util.NotificationHelper;
 import com.yaonan.util.WindowHelper;
-import com.yaonan.util.codec.Codec;
 import com.yaonan.util.jna.UI;
-import com.yaonan.util.json.Array;
 import com.yaonan.util.lang.StringUtil;
-import com.yaonan.util.lang.TimeUtil;
+import com.yaonan.view.ScreenshotView;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 
 /**
  * 应用主界面 Activity。
  *
- * <p>职责：展示并管理悬浮弹窗、无障碍服务、定时任务三者的授权与启停入口，
- * 以及"批量单删"定时任务的动态行配置（时间 + 脚本类型），并负责主题（默认/手账风）的切换。</p>
+ * <p>职责：管理悬浮弹窗、无障碍服务的授权入口，以及"检测文件"（TXT 链接列表）的选择；
+ * 链接检测的执行入口在悬浮窗上（避免依赖本界面存活），由 ScreenshotView 驱动。</p>
  */
 public class MainActivity extends AppCompatActivity {
 
     /** 视图绑定对象，用于访问布局中的控件 */
     private ActivityMainBinding binding;
+    /** TXT 文件选择的请求码 */
+    private static final int REQ_PICK_TXT = 101;
+    /** MMKV 中保存已选 TXT 文件 Uri 的键名 */
+    private static final String KEY_LINKS_URI = "links_uri";
     /** 是否处于手账风主题 */
     private boolean isJournalTheme = false;
     /** 最近一次点击开发者标签的时间戳，用于判断是否在 500ms 内连续点击（双击切换主题） */
@@ -65,18 +54,13 @@ public class MainActivity extends AppCompatActivity {
     private static final String KEY_JOURNAL_THEME = "journal_theme";
 
     /**
-     * 创建界面：绑定布局、初始化主题、注册各按钮点击事件，并恢复已保存的定时任务动态行。
+     * 创建界面：绑定布局、初始化主题、注册各按钮点击事件。
      */
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
-
-        NotificationHelper.check(this);
-
-        // 启动时弹出当前手机的 Android 版本（如 "Android版本: 14 (API 34)"）
-        UI.alert("Android版本: " + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")", this);
 
         MMKV kv = UI.getMMKV();
 
@@ -94,23 +78,6 @@ public class MainActivity extends AppCompatActivity {
                 UI.alert(isJournalTheme ? "已切换为手账风 ♡" : "已切换为默认风格", this);
             }
             lastDevTagClickTime = now;
-        });
-
-        // 版本号按钮：500ms 内双击即触发更新，打开 APK 下载链接
-        binding.btnAbout.setOnClickListener(v -> {
-            long now = System.currentTimeMillis();
-            if (now - lastAboutClickTime < 500) {
-                String updateUrl = "http://t2.tuielf.com/AndroidDemo-debug.apk";
-                try {
-                    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(updateUrl));
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    startActivity(intent);
-                    UI.alert("正在打开更新链接...", this);
-                } catch (Exception e) {
-                    UI.alert("打开更新链接失败", this);
-                }
-            }
-            lastAboutClickTime = now;
         });
 
         // 弹窗授权
@@ -140,235 +107,50 @@ public class MainActivity extends AppCompatActivity {
             startActivity(intent);
         });
 
-        // 定时任务
-        binding.btnStartTimer.setOnClickListener(v -> {
-            TimerService.start();
-            UI.alert("1、悬浮弹窗、无障碍服务、定时任务，要同时开启！\n2、可在通知中，查看定时任务是否运行！", this);
-        });
-        binding.btnStopTimer.setOnClickListener(v -> {
-            TimerService.stop();
-            UI.alert("定时任务运行脚本时，只能通过此按钮停止！", this);
+        // 选择TXT文件（每行一条链接）
+        binding.btnPickFile.setOnClickListener(v -> {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("text/*");
+            startActivityForResult(intent, REQ_PICK_TXT);
         });
 
-        // 批量单删：+/- 按钮
-        binding.btnBatchPlus.setOnClickListener(v -> {
-            LinearLayout rootLayout = findViewById(R.id.timer_rows);
-            addRow(rootLayout.getChildCount(), null, null);
-        });
-        binding.btnBatchMinus.setOnClickListener(v -> {
-            LinearLayout rootLayout = findViewById(R.id.timer_rows);
-            if (rootLayout.getChildCount() > 1) {
-                delRow(rootLayout.getChildCount() - 1);
-            }
-        });
+        // 恢复上次选择的文件链接数
+        refreshFileCount();
+    }
 
-        // 勾选方式：1逐个勾选（默认）、2滑动勾选
-        binding.spinnerCheckMode.setAdapter(new ArrayAdapter<>(this,
-                android.R.layout.simple_spinner_dropdown_item,
-                List.of("逐个勾选", "滑动勾选")));
-        binding.spinnerCheckMode.setSelection(Math.max(0, kv.decodeInt("check_mode", 1) - 1));
-        binding.spinnerCheckMode.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            // 用于跳过初始化时 setSelection 触发的第一次回调，避免重复保存
-            private boolean isInit = true;
-
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                if (isInit) {
-                    isInit = false;
-                    return;
-                }
-                kv.encode("check_mode", position + 1);
-                UI.alert("保存：" + (position == 0 ? "逐个勾选" : "滑动勾选"), MainActivity.this);
+    /**
+     * TXT 文件选择结果：持久化读取权限并刷新链接计数显示。
+     */
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_PICK_TXT && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            Uri uri = data.getData();
+            try {
+                // 持久化读取权限，重启应用后仍可读取
+                App.getApp().getContentResolver().takePersistableUriPermission(
+                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (Exception e) {
+                Log.e(TAG, "takePersistableUriPermission失败");
             }
-
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {
-            }
-        });
-
-        // 滑动时长（ms）：空或0表示按距离自动计算，手动指定便于测试
-        binding.etSwipeDuration.setText(kv.getString("swipe_duration", ""));
-        binding.etSwipeDuration.addTextChangedListener(new TextWatcher() {
-            @Override
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
-            }
-
-            @Override
-            public void onTextChanged(CharSequence s, int start, int before, int count) {
-            }
-
-            @Override
-            public void afterTextChanged(Editable s) {
-                String text = s.toString().trim();
-                if (text.isEmpty()) {
-                    kv.putString("swipe_duration", "");
-                    return;
-                }
-                try {
-                    long value = Long.parseLong(text);
-                    if (value < 0) {
-                        throw new NumberFormatException();
-                    }
-                    kv.putString("swipe_duration", String.valueOf(value));
-                } catch (NumberFormatException e) {
-                    // 非法输入不保存
-                }
-            }
-        });
-
-        // 定时任务，初始化动态行
-        String tasksJsonStr = kv.getString("tasks", "[]");
-        Array tasksArray = new Array(tasksJsonStr);
-        if (tasksArray.size() == 0) {
-            addRow(0, null, null);
-        } else {
-            for (int i = 0; i < tasksArray.size(); i++) {
-                Array taskArray = tasksArray.getArray(i);
-                String time = taskArray.getString(0);
-                int type = taskArray.getInteger(1);
-                // 存储的脚本类型值还原为下拉框下标（类型 - 2），与 addRow 的 defaultType 语义保持一致
-                addRow(i, time, type - 2);
-            }
+            UI.getMMKV().putString(KEY_LINKS_URI, uri.toString());
+            refreshFileCount();
         }
     }
 
     /**
-     * 保存动态行
-     * 空值的行不保存！
+     * 刷新文件卡片上的链接计数显示。
      */
-    private void saveTasks() {
-        LinearLayout rootLayout = findViewById(R.id.timer_rows);
-
-        List<List<Object>> tasksArray = new ArrayList<>();
-        for (int i = 0; i < rootLayout.getChildCount(); i++) {
-            RelativeLayout lineLayout = (RelativeLayout) rootLayout.getChildAt(i);
-            EditText timeText = (EditText) lineLayout.getChildAt(0);
-            Spinner timeSpinner = (Spinner) lineLayout.getChildAt(1);
-            String time = Objects.requireNonNullElse(timeText.getText(), "") + "";
-            // 脚本类型存储值 = 下拉框下标 + 2（下拉框下标从 0 开始，而"批量单删"对应类型 2）
-            int type = timeSpinner.getSelectedItemPosition() + 2;
-            if (StringUtil.isNotEmpty(time)) {
-                tasksArray.add(List.of(time, type));
-            }
+    @SuppressLint("SetTextI18n")
+    private void refreshFileCount() {
+        String uriStr = UI.getMMKV().getString(KEY_LINKS_URI, "");
+        if (StringUtil.isEmpty(uriStr)) {
+            binding.tvFileCount.setText("未选择文件");
+            return;
         }
-
-        String tasksJsonStr = Codec.json_encode(tasksArray);
-        Log.d(TAG, "保存定时任务: " + tasksJsonStr);
-        MMKV kv = UI.getMMKV();
-        kv.putString("tasks", tasksJsonStr);
-    }
-
-    /**
-     * 添加行
-     * @param index
-     * @param defaultTime null不设置默认值
-     * @param defaultType null不设置默认值
-     */
-    @SuppressLint("ClickableViewAccessibility")
-    private void addRow(int index, String defaultTime, Integer defaultType) {
-        LinearLayout rootLayout = findViewById(R.id.timer_rows);
-
-        RelativeLayout lineLayout = new RelativeLayout(MainActivity.this);
-        LinearLayout.LayoutParams lineLayoutParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT);
-        rootLayout.addView(lineLayout, index, lineLayoutParams);
-
-        // 创建【时间控件】
-        EditText timeText = new EditText(MainActivity.this);
-        if (defaultTime != null) {
-            timeText.setText(defaultTime);
-        }
-        timeText.setId(View.generateViewId());
-        timeText.setEms(3);
-        timeText.setOnTouchListener((v, event) -> {
-            if (event.getAction() != MotionEvent.ACTION_UP) {
-                return true;
-            }
-            String PATTERN = "HH:mm";
-            EditText editText = new EditText(MainActivity.this);
-            String oldTime = Objects.requireNonNullElse(timeText.getText(), "") + "";
-            if (StringUtil.isEmpty(oldTime)) {
-                editText.setText(TimeUtil.now(PATTERN));
-            } else {
-                editText.setText(oldTime);
-            }
-
-            new AlertDialog.Builder(MainActivity.this)
-                    .setView(editText)
-                    .setTitle("请输入时间")
-                    .setNeutralButton("清空", (dialog, which) -> {
-                        timeText.setText("");
-                        UI.alert("保存：\"\"");
-                        saveTasks();
-                    })
-                    .setNegativeButton("取消", (dialog, which) -> {
-                    })
-                    .setPositiveButton("确定", (dialog, which) -> {
-                        String newTime = Objects.requireNonNullElse(editText.getText(), "") + "";
-                        if (StringUtil.isEmpty(newTime)) {
-                            timeText.setText("");
-                            UI.alert("保存：\"\"");
-                            saveTasks();
-                        } else {
-                            try {
-                                String formatTime = TimeUtil.format(TimeUtil.parse(newTime, PATTERN), PATTERN);
-                                timeText.setText(formatTime);
-                                UI.alert("保存：" + formatTime);
-                                saveTasks();
-                            } catch (Exception e) {
-                                UI.alert("时间格式错误！");
-                            }
-                        }
-                    })
-                    .show();
-            return true;
-        });
-        RelativeLayout.LayoutParams timeTextParams = new RelativeLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT);
-        lineLayout.addView(timeText, timeTextParams);
-
-        // 创建【脚本类型】
-        Spinner timeSpinner = new Spinner(MainActivity.this);
-        timeSpinner.setAdapter(new ArrayAdapter<>(
-                timeSpinner.getContext(), android.R.layout.simple_spinner_dropdown_item,
-                List.of("批量单删")));
-        timeSpinner.setSelection(0);
-        timeSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            // 用于跳过初始化时 setSelection 触发的第一次回调，避免重复保存
-            boolean isSetSelection = true;
-
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                if (isSetSelection) {
-                    isSetSelection = false;
-                    return;
-                }
-                saveTasks();
-                UI.alert("保存：批量单删");
-            }
-
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {
-            }
-        });
-        RelativeLayout.LayoutParams timeSpinnerParams = new RelativeLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT);
-        timeSpinnerParams.addRule(RelativeLayout.END_OF, timeText.getId());
-        timeSpinnerParams.addRule(RelativeLayout.ALIGN_PARENT_END);
-        lineLayout.addView(timeSpinner, timeSpinnerParams);
-    }
-
-    /**
-     * 删除行
-     * @param index
-     */
-    private void delRow(int index) {
-        LinearLayout rootLayout = findViewById(R.id.timer_rows);
-        rootLayout.removeViewAt(index);
-        saveTasks();
+        int count = ScreenshotView.readLinks(Uri.parse(uriStr)).size();
+        binding.tvFileCount.setText("已加载 " + count + " 条链接");
     }
 
     // ===================== 主题切换 =====================
@@ -396,7 +178,7 @@ public class MainActivity extends AppCompatActivity {
         binding.scrollRoot.setBackgroundResource(R.drawable.bg_ha_page);
 
         binding.tvTitle.setTextColor(Color.parseColor("#FF8FA3"));
-        binding.tvTitle.setText("企微单删 ♡");
+        binding.tvTitle.setText("链接检测 ♡");
         binding.tvTitle.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         binding.tvTitle.setShadowLayer(3, 2, 2, Color.parseColor("#FFD6E0"));
 
@@ -413,21 +195,13 @@ public class MainActivity extends AppCompatActivity {
         binding.iconAccessImg.setImageTintList(ColorStateList.valueOf(Color.parseColor("#6B7BA8")));
         binding.tvAccessTitle.setTextColor(colorCardTitle);
 
-        applyCardJournal(binding.cardTimer, R.drawable.bg_ha_card_3, -0.5f, density);
-        binding.iconTimerBg.setBackgroundResource(R.drawable.bg_ha_icon_timer);
-        binding.iconTimerImg.setImageTintList(ColorStateList.valueOf(Color.parseColor("#C4845A")));
-        binding.tvTimerTitle.setTextColor(colorCardTitle);
+        applyCardJournal(binding.cardFile, R.drawable.bg_ha_card_3, -0.5f, density);
+        binding.iconFileBg.setBackgroundResource(R.drawable.bg_ha_icon_timer);
+        binding.iconFileImg.setImageTintList(ColorStateList.valueOf(Color.parseColor("#C4845A")));
+        binding.tvFileTitle.setTextColor(colorCardTitle);
 
-        applyCardJournal(binding.cardDelete, R.drawable.bg_ha_card_4, 0.7f, density);
-        binding.iconDeleteBg.setBackgroundResource(R.drawable.bg_ha_icon_delete);
-        binding.iconDeleteImg.setImageTintList(ColorStateList.valueOf(Color.parseColor("#C46460")));
-        binding.tvDeleteTitle.setTextColor(colorCardTitle);
-
-        applyCardJournal(binding.cardMode, R.drawable.bg_ha_card_2, 0.4f, density);
-        binding.tvModeTitle.setTextColor(colorCardTitle);
-        binding.etSwipeDuration.setBackgroundResource(R.drawable.bg_ha_btn_disabled);
-        binding.etSwipeDuration.setTextColor(colorDisabled);
-        binding.etSwipeDuration.setHintTextColor(colorDisabled);
+        applyCardJournal(binding.cardHelp, R.drawable.bg_ha_card_4, 0.7f, density);
+        binding.tvHelpTitle.setTextColor(colorCardTitle);
 
         binding.cardFooter.setBackgroundResource(R.drawable.bg_ha_footer);
         binding.cardFooter.setRotation(-0.3f);
@@ -445,14 +219,8 @@ public class MainActivity extends AppCompatActivity {
         binding.btnHideScreenshot.setTextColor(Color.WHITE);
         binding.btnStartA.setBackgroundResource(R.drawable.bg_ha_btn_primary);
         binding.btnStartA.setTextColor(Color.WHITE);
-        binding.btnStartTimer.setBackgroundResource(R.drawable.bg_ha_btn_primary);
-        binding.btnStartTimer.setTextColor(Color.WHITE);
-        binding.btnStopTimer.setBackgroundResource(R.drawable.bg_ha_btn_primary);
-        binding.btnStopTimer.setTextColor(Color.WHITE);
-        binding.btnBatchMinus.setBackgroundResource(R.drawable.bg_ha_btn_primary);
-        binding.btnBatchMinus.setTextColor(Color.WHITE);
-        binding.btnBatchPlus.setBackgroundResource(R.drawable.bg_ha_btn_primary);
-        binding.btnBatchPlus.setTextColor(Color.WHITE);
+        binding.btnPickFile.setBackgroundResource(R.drawable.bg_ha_btn_primary);
+        binding.btnPickFile.setTextColor(Color.WHITE);
     }
 
     /**
@@ -477,7 +245,7 @@ public class MainActivity extends AppCompatActivity {
         binding.scrollRoot.setBackgroundResource(R.color.page_bg);
 
         binding.tvTitle.setTextColor(colorTextPrimary);
-        binding.tvTitle.setText("企微单删");
+        binding.tvTitle.setText("链接检测");
         binding.tvTitle.setShadowLayer(0, 0, 0, Color.TRANSPARENT);
         binding.tvTitle.setLayerType(View.LAYER_TYPE_HARDWARE, null);
 
@@ -494,21 +262,13 @@ public class MainActivity extends AppCompatActivity {
         binding.iconAccessImg.setImageTintList(null);
         binding.tvAccessTitle.setTextColor(colorTextPrimary);
 
-        applyCardDefault(binding.cardTimer, density);
-        binding.iconTimerBg.setBackgroundResource(R.drawable.bg_icon_timer);
-        binding.iconTimerImg.setImageTintList(null);
-        binding.tvTimerTitle.setTextColor(colorTextPrimary);
+        applyCardDefault(binding.cardFile, density);
+        binding.iconFileBg.setBackgroundResource(R.drawable.bg_icon_timer);
+        binding.iconFileImg.setImageTintList(null);
+        binding.tvFileTitle.setTextColor(colorTextPrimary);
 
-        applyCardDefault(binding.cardDelete, density);
-        binding.iconDeleteBg.setBackgroundResource(R.drawable.bg_icon_delete);
-        binding.iconDeleteImg.setImageTintList(null);
-        binding.tvDeleteTitle.setTextColor(colorTextPrimary);
-
-        applyCardDefault(binding.cardMode, density);
-        binding.tvModeTitle.setTextColor(colorTextPrimary);
-        binding.etSwipeDuration.setBackgroundResource(R.drawable.bg_btn_disabled);
-        binding.etSwipeDuration.setTextColor(colorTextPrimary);
-        binding.etSwipeDuration.setHintTextColor(colorTextSecondary);
+        applyCardDefault(binding.cardHelp, density);
+        binding.tvHelpTitle.setTextColor(colorTextPrimary);
 
         binding.cardFooter.setBackgroundResource(R.drawable.bg_card);
         binding.cardFooter.setRotation(0);
@@ -526,14 +286,8 @@ public class MainActivity extends AppCompatActivity {
         binding.btnHideScreenshot.setTextColor(Color.WHITE);
         binding.btnStartA.setBackgroundResource(R.drawable.bg_btn_primary);
         binding.btnStartA.setTextColor(Color.WHITE);
-        binding.btnStartTimer.setBackgroundResource(R.drawable.bg_btn_primary);
-        binding.btnStartTimer.setTextColor(Color.WHITE);
-        binding.btnStopTimer.setBackgroundResource(R.drawable.bg_btn_primary);
-        binding.btnStopTimer.setTextColor(Color.WHITE);
-        binding.btnBatchMinus.setBackgroundResource(R.drawable.bg_btn_primary);
-        binding.btnBatchMinus.setTextColor(Color.WHITE);
-        binding.btnBatchPlus.setBackgroundResource(R.drawable.bg_btn_primary);
-        binding.btnBatchPlus.setTextColor(Color.WHITE);
+        binding.btnPickFile.setBackgroundResource(R.drawable.bg_btn_primary);
+        binding.btnPickFile.setTextColor(Color.WHITE);
     }
 
     /**

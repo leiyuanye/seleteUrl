@@ -2,13 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
 
     <application
         android:name=".App"
@@ -32,9 +26,6 @@
                 android:resource="@xml/accessibility_config" />
         </service>
 
-        <service android:name=".service.TimerService"
-            android:foregroundServiceType="mediaPlayback" />
-
         <activity
             android:name=".activity.MainActivity"
             android:exported="true">
@@ -45,10 +36,5 @@
             </intent-filter>
         </activity>
     </application>
-
-    <!-- 拉起app -->
-    <queries>
-        <package android:name="com.tencent.wework" /><!-- 企业微信 -->
-    </queries>
 
 </manifest>

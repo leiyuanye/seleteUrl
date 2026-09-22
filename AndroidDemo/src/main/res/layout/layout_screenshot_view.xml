@@ -22,12 +22,4 @@
         android:layout_height="20dp"
         android:background="@mipmap/ic_launcher" />
 
-    <Spinner
-        android:id="@+id/spinner_type"
-        android:layout_width="60dp"
-        android:layout_height="25dp"
-        android:layout_marginLeft="105dp"
-        android:alpha="0.6"
-        android:background="#FFEB3B" />
-
 </merge>

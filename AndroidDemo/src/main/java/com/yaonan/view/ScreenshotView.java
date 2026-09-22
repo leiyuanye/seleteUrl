@@ -2,43 +2,46 @@ package com.yaonan.view;
 import static com.yaonan.util.global.Global.TAG;
 
 import android.content.Context;
+import android.net.Uri;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
-import android.view.ViewGroup;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
 import android.widget.FrameLayout;
-import android.widget.Spinner;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import com.google.android.accessibility.selecttospeak.SelectToSpeakService;
 import com.tencent.mmkv.MMKV;
 import com.yaonan.App;
 import com.yaonan.R;
-import com.google.android.accessibility.selecttospeak.SelectToSpeakService;
 import com.yaonan.util.codec.Codec;
+import com.yaonan.util.exception.ExceptionUtil;
 import com.yaonan.util.jna.UI;
 import com.yaonan.util.lang.StringUtil;
 import com.yaonan.util.lang.ThreadUtil;
+import com.yaonan.util.lang.TimeUtil;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 悬浮截图视图（悬浮窗内容）。
+ * 悬浮控制视图（悬浮窗内容）。
  *
- * <p>职责：作为无障碍服务承载的悬浮 UI，提供"开始/停止"脚本开关与脚本类型选择，
- * 支持拖动，并负责驱动企业微信执行单删/批量单删自动化脚本。</p>
+ * <p>职责：作为无障碍服务承载的悬浮 UI，提供"开始/停止"链接检测脚本开关，支持拖动。
+ * 脚本流程：逐个读取 TXT 中的链接 → 在当前微信聊天界面发送 → 点击打开该链接 →
+ * 扫描页面风险关键词（诱导分享/长按网址等）→ 记录结果并返回聊天 → 逐个处理直到结束。</p>
+ *
+ * <p>使用方式：在主页选择 TXT 文件 → 用户手动打开微信并进入聊天界面 → 点击悬浮球"开始"。</p>
  */
 public class ScreenshotView extends FrameLayout {
-
-    /** 可选的脚本类型列表（"单删"对应类型 1，"批量单删"对应类型 2） */
-    public static final List<String> types = List.of("单删", "批量单删");
 
     /** 执行脚本的后台循环线程（null 表示当前未在运行） */
     public static Thread loopThread = null;
@@ -66,7 +69,7 @@ public class ScreenshotView extends FrameLayout {
     }
 
     /**
-     * 初始化视图：加载布局、绑定悬浮球的拖动与点击事件，并初始化脚本类型下拉框。
+     * 初始化视图：加载布局、绑定悬浮球的拖动与点击事件。
      */
     private void init() {
         LayoutInflater.from(getContext()).inflate(R.layout.layout_screenshot_view, this);
@@ -103,8 +106,8 @@ public class ScreenshotView extends FrameLayout {
                         v.setPressed(false);
                         // 未发生拖动时视为点击：未运行则启动脚本，运行中则停止脚本
                         if (!mIsMoving) {
+                            TextView textView = (TextView) v;
                             if (loopThread == null) {
-                                TextView textView = (TextView) v;
                                 loopThread = ThreadUtil.async(() -> {
                                     try {
                                         SelectToSpeakService.isRunning = true;
@@ -114,115 +117,30 @@ public class ScreenshotView extends FrameLayout {
                                         UI.invokeLater(() -> {
                                             textView.setText("停止");
                                         });
-                                        int type = App.getApp().getData("type");
-                                        Log.e(TAG, "类型：" + type);
-
-                                        String res = "";
-                                        int speed = 5000; // 速度
-                                        // 摩托罗拉，分辨率1080 * 2400/2520
-                                        // * 不锁定任务，不开启无障碍服务，清除任务后，app进程会被kill
-                                        // * 不锁定任务，开启无障碍服务，清除任务后，app进程不会立刻被kill，但是锁屏、launchApp时会被kill，但是无障碍服务还是开启
-                                        // * 不锁定任务，开启无障碍服务，清除任务后，重新打开app，再锁屏等就不会被kill
-                                        // * 结论：开启锁定任务（不要手动删除锁定的任务）
-
-                                        if (type == 1) { // 单删
-                                            while (!ThreadUtil.isInterrupted()) {
-                                                cmd(danXiangKeHuCmd());
-                                                Thread.sleep(1500);
-                                            }
-
-                                        } else if (type == 2) { // 批量单删
-                                            // 清除任务
-                                            qingChuRenWu(speed);
-
-                                            // 全部清除后，重新打开本app，否则执行launchApp时qwdelete进程会被kill
-                                            // （不开启无障碍服务，清除任务qwdelete进程也会被kill，开启则不会）
-                                            UI.launchApp("com.yaonan.qwdelete");
-                                            Thread.sleep(speed);
-
-                                            for (int i = 0; i < 6; i++) {
-                                                int appIndex = i;
-                                                UI.invokeLater(() -> {
-                                                    textView.setText("停止" + appIndex);
-                                                });
-
-                                                // 拉起企业微信多开选择弹窗
-                                                UI.launchApp("com.tencent.wework");
-                                                Thread.sleep(speed);
-
-                                                cmd("#@#打开企业微信" + appIndex);
-                                                Thread.sleep(speed * 3);
-
-                                                res = cmdWait("#@#通讯录#");
-                                                Thread.sleep(speed);
-                                                if ("error".equals(res)) {
-                                                    continue; // 未登录，跳下一个企微
-                                                }
-
-                                                cmd("#@#我的客户#");
-                                                Thread.sleep(speed/* * 2*/);
-
-                                                res = cmdWait("#@#全部微信客户#");
-                                                Thread.sleep(speed);
-                                                if ("error".equals(res)) {
-                                                    continue; // 没有客户，跳下一个企微
-                                                }
-
-                                                cmd("#@#单向微信客户#");
-                                                Thread.sleep(speed);
-
-                                                cmd("#@#编辑#");
-                                                Thread.sleep(speed);
-
-                                                // 单删
-                                                int count = 0;
-                                                while (!ThreadUtil.isInterrupted()) {
-                                                    cmd(danXiangKeHuCmd());
-                                                    Thread.sleep(1500);
-
-                                                    // 每10次，查询单删到尾部数字结果
-                                                    if ((++count) % 10 == 9) {
-                                                        res = cmdWait("#@#共n个客户#", 20);
-                                                        Thread.sleep(1000);
-                                                        if ("break".equals(res)) {
-                                                            break;
-                                                        }
-                                                    }
-                                                }
-
-                                                // 返回桌面
-                                                cmd("#@#action#home");
-                                                Thread.sleep(speed);
-                                            }
-
-                                            // 清除任务
-                                            qingChuRenWu(speed);
-                                        }
+                                        runLinkCheck(textView);
                                         UI.invokeLater(() -> {
-                                            UI.alert("已停止");
+                                            UI.alert("已全部完成");
                                         });
                                     } catch (InterruptedException e) {
                                         // 手动停止
-                                        SelectToSpeakService.isRunning = false;
                                         UI.invokeLater(() -> {
                                             UI.alert("已停止");
                                         });
                                     } catch (Exception e) {
-                                        SelectToSpeakService.isRunning = false;
                                         UI.invokeLater(() -> {
                                             UI.alert(e);
                                         });
+                                    } finally {
+                                        SelectToSpeakService.isRunning = false;
+                                        loopThread = null;
+                                        UI.invokeLater(() -> {
+                                            textView.setText("开始");
+                                        });
                                     }
-                                    SelectToSpeakService.isRunning = false;
-                                    loopThread = null;
-                                    UI.invokeLater(() -> {
-                                        textView.setText("开始");
-                                    });
                                 });
                             } else {
                                 // 暂停脚本
                                 Log.e(TAG, "手动停止");
-                                SelectToSpeakService.isRunning = false;
                                 loopThread.interrupt();
                             }
                         }
@@ -234,44 +152,121 @@ public class ScreenshotView extends FrameLayout {
                 return Math.abs(event.getX() - mDownX) > MIN_MOVING_PIXELS || Math.abs(event.getY() - mDownY) > MIN_MOVING_PIXELS;
             }
         });
+    }
 
-        // 类型设置
-        // 根据各类型是否授权（permission_1/permission_2）过滤可选项
-        List<String> typeOptions = new ArrayList<>(types);
-        MMKV kv = UI.getMMKV();
-        for (int i = 0; i < types.size(); i++) {
-            if (!kv.getBoolean("permission_" + (i + 1), true)) {
-                typeOptions.remove(types.get(i));
-            }
+    /**
+     * 链接检测主流程：逐个读取 TXT 中的链接并发送到当前微信聊天，
+     * 点击打开链接扫描风险关键词，记录结果后返回聊天，继续处理下一条。
+     *
+     * @param textView 悬浮球文本控件，用于显示进度
+     */
+    private void runLinkCheck(TextView textView) throws InterruptedException {
+        // 读取TXT链接列表
+        String uriStr = UI.getMMKV().getString("links_uri", "");
+        List<String> links = StringUtil.isEmpty(uriStr) ? new ArrayList<>() : readLinks(Uri.parse(uriStr));
+        if (links.isEmpty()) {
+            UI.invokeLater(() -> UI.alert("未读取到链接，请先在主页选择TXT文件（每行一条链接）"));
+            return;
         }
-        Spinner spinnerType = findViewById(R.id.spinner_type);
-        spinnerType.setAdapter(new ArrayAdapter<String>(
-                getContext(), android.R.layout.simple_spinner_dropdown_item, typeOptions) {
-            @NonNull
-            @Override
-            public View getView(int position, @Nullable View convertView, @NonNull ViewGroup parent) {
-                TextView view = (TextView) super.getView(position, convertView, parent);
-                view.setTextSize(10); // 已选项的字体大小
-                return view;
+
+        // 写入本次检测结果表头（文件为追加模式，历史结果按表头分块）
+        appendResult("===== 检测开始 " + TimeUtil.nowTime() + "，共" + links.size() + "条 =====");
+
+        int riskCount = 0;
+        for (int i = 0; i < links.size(); i++) {
+            if (ThreadUtil.isInterrupted()) {
+                throw new InterruptedException();
             }
-        });
-        spinnerType.setSelection(typeOptions.indexOf("批量单删")); // 触发一次onItemSelected，-1选中0
-        spinnerType.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                String typeName = (String) spinnerType.getSelectedItem();
-                int type = types.indexOf(typeName) + 1;
-                App.getApp().setData("type", type);
-                Log.d(TAG, "类型" + App.getApp().getData("type") + "：" + typeName);
-                UI.alert("类型" + App.getApp().getData("type") + "：" + typeName);
+            String link = links.get(i);
+            int index = i + 1;
+            UI.invokeLater(() -> textView.setText(index + "/" + links.size()));
+            Log.e(TAG, "===== [" + index + "/" + links.size() + "] " + link);
+
+            // 1、发送链接（同步等待结果）
+            String sendRes = cmdWait("#@#发送链接#" + link, 15);
+            if (!"success".equals(sendRes)) {
+                Log.e(TAG, "发送失败: " + sendRes);
+                appendResult("[发送失败][" + sendRes + "] " + link);
+                cmd("#@#action#back");
+                ThreadUtil.sleep(1500);
+                continue;
             }
 
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {
+            // 2、等待消息出现在聊天列表
+            ThreadUtil.sleep(1500);
 
+            // 3、点击链接并扫描风险关键词（同步等待结果）
+            String checkRes = cmdWait("#@#检查链接#" + link, 25);
+            if (checkRes.startsWith("risk")) {
+                riskCount++;
+                String keyword = checkRes.substring("risk:".length());
+                appendResult("[风险-" + keyword + "] " + link);
+                UI.invokeLater(() -> UI.alert("⚠️ 发现风险链接 " + index + "/" + links.size()
+                        + "\n关键词：" + keyword + "\n" + link, true));
+            } else if ("normal".equals(checkRes)) {
+                appendResult("[正常] " + link);
+            } else {
+                appendResult("[异常-" + checkRes + "] " + link);
             }
-        });
 
+            // 4、从网页返回聊天界面
+            ThreadUtil.sleep(500);
+            cmd("#@#action#back");
+            ThreadUtil.sleep(2000);
+        }
+
+        String summary = "检测完成：共" + links.size() + "条，风险" + riskCount + "条\n结果已保存到 check_result.txt";
+        UI.invokeLater(() -> UI.alert(summary, true));
+        appendResult("===== 检测结束 " + TimeUtil.nowTime() + "，风险" + riskCount + "/" + links.size() + " =====");
+    }
+
+    /**
+     * 读取 TXT 文件中的链接（每行一条，仅保留 http/https 开头的行，自动去除首尾空白）。
+     *
+     * @param uri TXT 文件的 content:// Uri
+     * @return 链接列表
+     */
+    public static List<String> readLinks(Uri uri) {
+        List<String> links = new ArrayList<>();
+        try (InputStream is = App.getApp().getContentResolver().openInputStream(uri)) {
+            if (is == null) {
+                return links;
+            }
+            byte[] bytes = new byte[is.available()];
+            int read = is.read(bytes);
+            if (read <= 0) {
+                return links;
+            }
+            String content = new String(bytes, 0, read, StandardCharsets.UTF_8);
+            for (String line : content.split("\n")) {
+                String trimmed = line.trim();
+                if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+                    links.add(trimmed);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "读取TXT失败");
+            ExceptionUtil.getStackTrace(e);
+        }
+        return links;
+    }
+
+    /**
+     * 追加一条检测结果到应用私有外部存储的 check_result.txt（UTF-8）。
+     *
+     * @param line 结果行
+     */
+    private void appendResult(String line) {
+        try {
+            File file = new File(App.getApp().getExternalFilesDir(null), "check_result.txt");
+            FileOutputStream fos = new FileOutputStream(file, true);
+            fos.write((line + "\n").getBytes(StandardCharsets.UTF_8));
+            fos.close();
+            Log.d(TAG, "结果: " + line);
+        } catch (Exception e) {
+            Log.e(TAG, "写入结果失败");
+            ExceptionUtil.getStackTrace(e);
+        }
     }
 
     /**
@@ -291,41 +286,6 @@ public class ScreenshotView extends FrameLayout {
     /* ****************************************** 命令 *********************************************/
 
     /**
-     * 清除任务
-     * 要兼容摩托罗拉手机：手动点击弹窗开始后
-     * @param speed
-     * @throws InterruptedException
-     */
-    public void qingChuRenWu(long speed) throws InterruptedException {
-        // 不执行home，后面获取不到"全部清除"节点
-        cmd("#@#action#home");
-        Thread.sleep(speed);
-
-        // 返回桌面，前台服务解锁屏幕后，第一次执行会失败，没有反应
-        cmd("#@#action#home");
-        Thread.sleep(speed);
-
-        // 先home再recents，才能获取到"全部清除"节点，否则是当前app节点
-        cmd("#@#action#recents");
-        Thread.sleep(speed);
-
-        cmd("#@#全部清除#");
-        Thread.sleep(speed);
-    }
-
-    /**
-     * 构建单向客户命令：附带勾选方式（1逐个/2滑动）与滑动时长（ms，0=按距离自动计算）
-     */
-    private String danXiangKeHuCmd() {
-        MMKV kv = UI.getMMKV();
-        String duration = kv.getString("swipe_duration", "").trim();
-        if (StringUtil.isEmpty(duration)) {
-            duration = "0";
-        }
-        return "#@#danxiangkehu#" + kv.decodeInt("check_mode", 1) + "#" + duration;
-    }
-
-    /**
      * 点击、滑动等操作
      * 异步执行
      * @param str 如"#@#tap#320,2185"
@@ -336,10 +296,10 @@ public class ScreenshotView extends FrameLayout {
 
     /**
      * 点击、滑动等操作
-     * 同步执行，执行后不用再Thread.sleep()等待
+     * 同步执行，最多等待 maxTimes 秒
      * @param str 如"#@#tap#320,2185"
      * @param maxTimes 等待多少次后继续执行，防止缓存更新失败等导致的死循环
-     * @return
+     * @return 执行结果（msgid 对应的应答），超时返回 "timeout"
      * @throws InterruptedException
      */
     public String cmdWait(String str, int maxTimes) throws InterruptedException {
@@ -367,36 +327,5 @@ public class ScreenshotView extends FrameLayout {
 
         Log.d(TAG, "cmdWait " + msgid + "<-timeout");
         return "timeout";
-    }
-
-    /**
-     * 点击、滑动等操作
-     * 同步执行，执行后不用再Thread.sleep()等待
-     * @param str 如"#@#tap#320,2185"
-     * @return
-     * @throws InterruptedException
-     */
-    public String cmdWait(String str) throws InterruptedException {
-        String msgid = Codec.uuid();
-
-        {
-            MMKV kv = UI.getMMKV();
-            kv.putString(msgid, "", 3600);
-            Log.d(TAG, "cmdWait " + msgid + "<-");
-
-            ScreenshotView.this.announceForAccessibility(msgid + "{msgid}" + str);
-        }
-
-        while (true) {
-            Thread.sleep(1000);
-
-            MMKV kv = UI.getMMKV();
-            String res = kv.getString(msgid, "");
-            Log.d(TAG, "cmdWait " + msgid + "<-" + res);
-            if (StringUtil.isNotEmpty(res)) {
-                kv.remove(msgid);
-                return res;
-            }
-        }
     }
 }

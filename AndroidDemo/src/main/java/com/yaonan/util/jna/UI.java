@@ -1,29 +1,23 @@
 package com.yaonan.util.jna;
 
-import static android.content.Context.KEYGUARD_SERVICE;
 import static com.yaonan.util.global.Global.TAG;
 
-import android.app.Activity;
-import android.app.KeyguardManager;
 import android.content.Context;
 import android.content.Intent;
-import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.PowerManager;
 import android.util.Log;
 import android.widget.Toast;
 
 import com.tencent.mmkv.MMKV;
 import com.yaonan.App;
-import com.yaonan.R;
 import com.yaonan.util.exception.ExceptionUtil;
 import com.yaonan.util.lang.ThreadUtil;
 
 /**
  * UI 工具类。
  *
- * <p>提供主线程任务调度、Toast 提示、MMKV 获取、应用启动以及屏幕唤醒/解锁等界面与系统交互能力。</p>
+ * <p>提供主线程任务调度、Toast 提示、MMKV 获取、应用启动等界面与系统交互能力。</p>
  */
 public class UI {
 
@@ -134,27 +128,6 @@ public class UI {
         if (intent != null) {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             App.getApp().startActivity(intent);
-        }
-    }
-
-    /**
-     * 唤醒并解锁屏幕（灭屏时点亮屏幕，锁屏时尝试请求解锁）。
-     */
-    public static void wakeup() {
-        PowerManager powerManager = (PowerManager) App.getApp().getSystemService(Context.POWER_SERVICE);
-        // 屏幕关闭时短暂持有唤醒锁点亮屏幕
-        if (!powerManager.isScreenOn()) {
-            PowerManager.WakeLock wakeLock = powerManager.newWakeLock(
-                    PowerManager.FULL_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP | PowerManager.ON_AFTER_RELEASE,
-                    App.getApp().getPackageName() + ":wake");
-            wakeLock.acquire(3000);
-        }
-        KeyguardManager keyguardManager = (KeyguardManager) App.getApp().getSystemService(KEYGUARD_SERVICE);
-        // 锁屏时尝试解除键盘锁（Android 8.0 及以上）
-        if (keyguardManager.isKeyguardLocked()) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                keyguardManager.requestDismissKeyguard((Activity) null, null);
-            }
         }
     }
 }
