@@ -24,6 +24,7 @@ import com.tencent.mmkv.MMKV;
 import com.yaonan.util.codec.Codec;
 import com.yaonan.util.exception.ExceptionUtil;
 import com.yaonan.util.jna.UI;
+import com.yaonan.util.LogHelper;
 import com.yaonan.util.lang.StringUtil;
 import com.yaonan.util.lang.ThreadUtil;
 
@@ -68,7 +69,7 @@ public class SelectToSpeakService extends AccessibilityService {
      */
     @Override
     protected void onServiceConnected() {
-        //Log.e(TAG, "无障碍服务启动");
+        //LogHelper.e(TAG, "无障碍服务启动");
         super.onServiceConnected();
     }
 
@@ -101,7 +102,7 @@ public class SelectToSpeakService extends AccessibilityService {
                 final String fMsgid = msgid;
 
                 if (cmd != null && cmd.startsWith("#@#")) {
-                    Log.e(TAG, cmd);
+                    LogHelper.e(TAG, cmd);
                     if ("#@#debug#".equals(cmd)) {
                         // 调试查找view
                         debugRun();
@@ -139,7 +140,7 @@ public class SelectToSpeakService extends AccessibilityService {
                 }
             }
         } catch (Exception e) {
-            Log.e(TAG, "无障碍回调异常");
+            LogHelper.e(TAG, "无障碍回调异常");
             ExceptionUtil.getStackTrace(e);
         }
     }
@@ -157,7 +158,7 @@ public class SelectToSpeakService extends AccessibilityService {
             // 1、点击输入框聚焦（弹出键盘，确保粘贴目标就绪）
             AccessibilityNodeInfo editNode = findChatEditText();
             if (editNode == null) {
-                Log.e(TAG, "发送链接失败: 未找到聊天输入框");
+                LogHelper.e(TAG, "发送链接失败: 未找到聊天输入框");
                 response(msgid, "error");
                 return;
             }
@@ -176,7 +177,7 @@ public class SelectToSpeakService extends AccessibilityService {
 
             // 3、粘贴未生效时退回 SET_TEXT 方式
             if (!isInputFilled(url)) {
-                Log.e(TAG, "粘贴未生效，退回SET_TEXT方式");
+                LogHelper.e(TAG, "粘贴未生效，退回SET_TEXT方式");
                 editNode = findChatEditText();
                 if (editNode != null) {
                     Bundle arguments = new Bundle();
@@ -189,11 +190,11 @@ public class SelectToSpeakService extends AccessibilityService {
             }
 
             if (!isInputFilled(url)) {
-                Log.e(TAG, "发送链接失败: 输入框未填入链接");
+                LogHelper.e(TAG, "发送链接失败: 输入框未填入链接");
                 response(msgid, "error");
                 return;
             }
-            Log.e(TAG, "输入 " + url);
+            LogHelper.e(TAG, "输入 " + url);
 
             // 点击"发送"并验证：发送成功后微信会清空输入框，以此为准做闭环校验。
             // 每轮两种方式：1无障碍节点点击；2截屏+OCR查找"发送"文字坐标后手势点击。
@@ -202,28 +203,28 @@ public class SelectToSpeakService extends AccessibilityService {
                 clickSendButton();
                 ThreadUtil.sleep(1500);
                 if (isInputCleared(url)) {
-                    Log.e(TAG, "发送成功-节点点击(第" + attempt + "次尝试)");
+                    LogHelper.e(TAG, "发送成功-节点点击(第" + attempt + "次尝试)");
                     response(msgid, "success");
                     return;
                 }
 
                 // 方式2：截屏 + OCR 查找"发送"文字坐标，手势点击
                 if (ocrTapText("发送")) {
-                    Log.e(TAG, "OCR已点击发送(第" + attempt + "次尝试)");
+                    LogHelper.e(TAG, "OCR已点击发送(第" + attempt + "次尝试)");
                     ThreadUtil.sleep(1500);
                     if (isInputCleared(url)) {
-                        Log.e(TAG, "发送成功-OCR点击(第" + attempt + "次尝试)");
+                        LogHelper.e(TAG, "发送成功-OCR点击(第" + attempt + "次尝试)");
                         response(msgid, "success");
                         return;
                     }
                 }
-                Log.e(TAG, "发送未生效(第" + attempt + "次尝试)，重试");
+                LogHelper.e(TAG, "发送未生效(第" + attempt + "次尝试)，重试");
             }
 
-            Log.e(TAG, "发送链接失败: 多次尝试后输入框仍未清空");
+            LogHelper.e(TAG, "发送链接失败: 多次尝试后输入框仍未清空");
             response(msgid, "error");
         } catch (Exception e) {
-            Log.e(TAG, "发送链接异常: " + e.getMessage());
+            LogHelper.e(TAG, "发送链接异常: " + e.getMessage());
             ExceptionUtil.getStackTrace(e);
             response(msgid, "error");
         }
@@ -269,11 +270,11 @@ public class SelectToSpeakService extends AccessibilityService {
      */
     private boolean ocrTapText(String target) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            Log.e(TAG, "OCR点击跳过: 需要Android 11+");
+            LogHelper.e(TAG, "OCR点击跳过: 需要Android 11+");
             return false;
         }
         try {
-            Log.e(TAG, "OCR截屏查找[" + target + "]...");
+            LogHelper.e(TAG, "OCR截屏查找[" + target + "]...");
             CountDownLatch latch = new CountDownLatch(1);
             AtomicBoolean tapped = new AtomicBoolean(false);
 
@@ -298,11 +299,11 @@ public class SelectToSpeakService extends AccessibilityService {
                                 .addOnSuccessListener(visionText -> {
                                     Rect rect = findTextRect(visionText, target);
                                     if (rect != null) {
-                                        Log.e(TAG, "OCR命中[" + target + "] " + rect);
+                                        LogHelper.e(TAG, "OCR命中[" + target + "] " + rect);
                                         _Tap(rect.centerX(), rect.centerY(), 100L, null);
                                         tapped.set(true);
                                     } else {
-                                        Log.e(TAG, "OCR未找到[" + target + "]");
+                                        LogHelper.e(TAG, "OCR未找到[" + target + "]");
                                     }
                                 })
                                 .addOnCompleteListener(task -> {
@@ -310,14 +311,14 @@ public class SelectToSpeakService extends AccessibilityService {
                                     latch.countDown();
                                 });
                     } catch (Exception e) {
-                        Log.e(TAG, "OCR处理异常: " + e.getMessage());
+                        LogHelper.e(TAG, "OCR处理异常: " + e.getMessage());
                         latch.countDown();
                     }
                 }
 
                 @Override
                 public void onFailure(int errorCode) {
-                    Log.e(TAG, "OCR截屏失败: code=" + errorCode);
+                    LogHelper.e(TAG, "OCR截屏失败: code=" + errorCode);
                     latch.countDown();
                 }
             });
@@ -326,7 +327,7 @@ public class SelectToSpeakService extends AccessibilityService {
             latch.await(8, TimeUnit.SECONDS);
             return tapped.get();
         } catch (Exception e) {
-            Log.e(TAG, "OCR点击异常: " + e.getMessage());
+            LogHelper.e(TAG, "OCR点击异常: " + e.getMessage());
             return false;
         }
     }
@@ -377,7 +378,7 @@ public class SelectToSpeakService extends AccessibilityService {
     private void clickSendButton() {
         AccessibilityNodeInfo root = getRootInActiveWindow();
         if (root == null) {
-            Log.e(TAG, "点击发送失败: 无活动窗口");
+            LogHelper.e(TAG, "点击发送失败: 无活动窗口");
             return;
         }
         List<AccessibilityNodeInfo> sendNodes = root.findAccessibilityNodeInfosByText("发送");
@@ -392,14 +393,14 @@ public class SelectToSpeakService extends AccessibilityService {
             }
             if (node.isClickable()) {
                 node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                Log.e(TAG, "点击 发送(click) " + rect);
+                LogHelper.e(TAG, "点击 发送(click) " + rect);
             } else {
                 _Tap(rect.centerX(), rect.centerY(), 100L, null);
-                Log.e(TAG, "点击 发送(tap) " + rect);
+                LogHelper.e(TAG, "点击 发送(tap) " + rect);
             }
             return;
         }
-        Log.e(TAG, "点击发送失败: 未找到 发送 按钮");
+        LogHelper.e(TAG, "点击发送失败: 未找到 发送 按钮");
     }
 
     /**
@@ -426,7 +427,7 @@ public class SelectToSpeakService extends AccessibilityService {
                 }
             }
             if (linkNode == null) {
-                Log.e(TAG, "检查链接失败: 聊天中未找到 " + url);
+                LogHelper.e(TAG, "检查链接失败: 聊天中未找到 " + url);
                 response(msgid, "nofind");
                 return;
             }
@@ -434,7 +435,7 @@ public class SelectToSpeakService extends AccessibilityService {
             Rect rect = new Rect();
             linkNode.getBoundsInScreen(rect);
             _Tap(rect.centerX(), rect.centerY(), 100L, null);
-            Log.e(TAG, "点击链接 " + rect);
+            LogHelper.e(TAG, "点击链接 " + rect);
 
             // 等待页面加载
             ThreadUtil.sleep(4000);
@@ -449,17 +450,17 @@ public class SelectToSpeakService extends AccessibilityService {
                 String text = textCs.toString();
                 for (String keyword : RISK_KEYWORDS) {
                     if (text.contains(keyword)) {
-                        Log.e(TAG, "风险页面: 命中关键词[" + keyword + "] " + text);
+                        LogHelper.e(TAG, "风险页面: 命中关键词[" + keyword + "] " + text);
                         response(msgid, "risk:" + keyword);
                         return;
                     }
                 }
             }
 
-            Log.e(TAG, "页面正常");
+            LogHelper.e(TAG, "页面正常");
             response(msgid, "normal");
         } catch (Exception e) {
-            Log.e(TAG, "检查链接异常: " + e.getMessage());
+            LogHelper.e(TAG, "检查链接异常: " + e.getMessage());
             ExceptionUtil.getStackTrace(e);
             response(msgid, "error");
         }
@@ -584,7 +585,7 @@ public class SelectToSpeakService extends AccessibilityService {
         String json = Codec.json_encode_pretty(parentMap);
         String[] lines = StringUtil.split(json, "\n");
         for (String line : lines) {
-            Log.d(TAG, line);
+            LogHelper.d(TAG, line);
         }
     }
 
@@ -623,6 +624,6 @@ public class SelectToSpeakService extends AccessibilityService {
     private synchronized void response(String msgid, String res) {
         MMKV kv = UI.getMMKV();
         kv.putString(msgid, res, 3600);
-        Log.d(TAG, "response " + msgid + "->" + res);
+        LogHelper.d(TAG, "response " + msgid + "->" + res);
     }
 }

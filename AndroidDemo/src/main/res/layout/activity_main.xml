@@ -245,6 +245,39 @@
                 android:textSize="12sp" />
         </LinearLayout>
 
+        <!-- 卡片4：运行日志 -->
+        <LinearLayout
+            android:id="@+id/card_log"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/bg_card"
+            android:padding="16dp"
+            android:layout_marginBottom="4dp"
+            android:elevation="1dp">
+
+            <TextView
+                android:id="@+id/tv_log_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="运行日志"
+                android:textColor="@color/text_primary"
+                android:textSize="15sp" />
+
+            <Button
+                android:id="@+id/btn_log_share"
+                style="@style/BtnPrimary"
+                android:text="分享" />
+
+            <Button
+                android:id="@+id/btn_log_clear"
+                style="@style/BtnPrimary"
+                android:layout_marginStart="8dp"
+                android:text="清空" />
+        </LinearLayout>
+
         <!-- 底部：版本号 + 开发者 -->
         <LinearLayout
             android:id="@+id/card_footer"

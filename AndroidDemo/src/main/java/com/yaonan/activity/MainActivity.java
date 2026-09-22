@@ -11,23 +11,25 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
-import android.util.Log;
 import android.view.View;
 import android.view.accessibility.AccessibilityManager;
 
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
 
 import com.tencent.mmkv.MMKV;
 import com.yaonan.App;
 import com.yaonan.R;
 import com.yaonan.databinding.ActivityMainBinding;
+import com.yaonan.util.LogHelper;
 import com.yaonan.util.WindowHelper;
 import com.yaonan.util.jna.UI;
 import com.yaonan.util.lang.StringUtil;
 import com.yaonan.view.ScreenshotView;
 
+import java.io.File;
 import java.util.List;
 
 /**
@@ -61,6 +63,8 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
+
+        LogHelper.i(TAG, "===== App启动 =====");
 
         MMKV kv = UI.getMMKV();
 
@@ -115,6 +119,15 @@ public class MainActivity extends AppCompatActivity {
             startActivityForResult(intent, REQ_PICK_TXT);
         });
 
+        // 运行日志：分享（通过微信/QQ等发送日志文件）
+        binding.btnLogShare.setOnClickListener(v -> shareLogFile());
+
+        // 运行日志：清空
+        binding.btnLogClear.setOnClickListener(v -> {
+            LogHelper.clear();
+            UI.alert("日志已清空", this);
+        });
+
         // 恢复上次选择的文件链接数
         refreshFileCount();
     }
@@ -132,10 +145,34 @@ public class MainActivity extends AppCompatActivity {
                 App.getApp().getContentResolver().takePersistableUriPermission(
                         uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
             } catch (Exception e) {
-                Log.e(TAG, "takePersistableUriPermission失败");
+                LogHelper.e(TAG, "takePersistableUriPermission失败: " + e.getMessage());
             }
             UI.getMMKV().putString(KEY_LINKS_URI, uri.toString());
+            int count = ScreenshotView.readLinks(uri).size();
+            LogHelper.i(TAG, "选择TXT文件: " + uri + "，共" + count + "条链接");
             refreshFileCount();
+        }
+    }
+
+    /**
+     * 通过系统分享发送日志文件（微信/QQ等任意支持文本文件分享的应用）。
+     */
+    private void shareLogFile() {
+        try {
+            File file = LogHelper.getLogFile();
+            if (!file.exists() || file.length() == 0) {
+                UI.alert("暂无日志文件", this);
+                return;
+            }
+            Uri uri = FileProvider.getUriForFile(this,
+                    getPackageName() + ".fileprovider", file);
+            Intent intent = new Intent(Intent.ACTION_SEND);
+            intent.setType("text/plain");
+            intent.putExtra(Intent.EXTRA_STREAM, uri);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(intent, "分享运行日志"));
+        } catch (Exception e) {
+            UI.alert("分享失败: " + e.getMessage(), this);
         }
     }
 
@@ -203,6 +240,9 @@ public class MainActivity extends AppCompatActivity {
         applyCardJournal(binding.cardHelp, R.drawable.bg_ha_card_4, 0.7f, density);
         binding.tvHelpTitle.setTextColor(colorCardTitle);
 
+        applyCardJournal(binding.cardLog, R.drawable.bg_ha_card_2, 0.4f, density);
+        binding.tvLogTitle.setTextColor(colorCardTitle);
+
         binding.cardFooter.setBackgroundResource(R.drawable.bg_ha_footer);
         binding.cardFooter.setRotation(-0.3f);
         binding.cardFooter.setElevation(0);
@@ -269,6 +309,9 @@ public class MainActivity extends AppCompatActivity {
 
         applyCardDefault(binding.cardHelp, density);
         binding.tvHelpTitle.setTextColor(colorTextPrimary);
+
+        applyCardDefault(binding.cardLog, density);
+        binding.tvLogTitle.setTextColor(colorTextPrimary);
 
         binding.cardFooter.setBackgroundResource(R.drawable.bg_card);
         binding.cardFooter.setRotation(0);

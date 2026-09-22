@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 日志文件目录：getExternalFilesDir("logs") -->
+    <external-files-path
+        name="logs"
+        path="logs/" />
+    <!-- 检测结果文件目录：getExternalFilesDir(null) -->
+    <external-files-path
+        name="files"
+        path="." />
+</paths>

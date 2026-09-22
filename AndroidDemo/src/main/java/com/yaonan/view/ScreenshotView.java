@@ -22,6 +22,7 @@ import com.yaonan.util.ClipboardHelper;
 import com.yaonan.util.codec.Codec;
 import com.yaonan.util.exception.ExceptionUtil;
 import com.yaonan.util.jna.UI;
+import com.yaonan.util.LogHelper;
 import com.yaonan.util.lang.StringUtil;
 import com.yaonan.util.lang.ThreadUtil;
 import com.yaonan.util.lang.TimeUtil;
@@ -141,7 +142,7 @@ public class ScreenshotView extends FrameLayout {
                                 });
                             } else {
                                 // 暂停脚本
-                                Log.e(TAG, "手动停止");
+                                LogHelper.e(TAG, "手动停止");
                                 loopThread.interrupt();
                             }
                         }
@@ -181,18 +182,18 @@ public class ScreenshotView extends FrameLayout {
             String link = links.get(i);
             int index = i + 1;
             UI.invokeLater(() -> textView.setText(index + "/" + links.size()));
-            Log.e(TAG, "===== [" + index + "/" + links.size() + "] " + link);
+            LogHelper.e(TAG, "===== [" + index + "/" + links.size() + "] " + link);
 
             // 1、写入剪贴板（无障碍服务在微信内通过粘贴输入，粘贴会触发"发送"按钮显示）
             boolean clipOk = ClipboardHelper.setString(link);
             if (!clipOk) {
-                Log.e(TAG, "剪贴板写入失败，服务端将退回SET_TEXT方式");
+                LogHelper.e(TAG, "剪贴板写入失败，服务端将退回SET_TEXT方式");
             }
 
             // 2、发送链接（同步等待结果）
             String sendRes = cmdWait("#@#发送链接#" + link, 20);
             if (!"success".equals(sendRes)) {
-                Log.e(TAG, "发送失败: " + sendRes);
+                LogHelper.e(TAG, "发送失败: " + sendRes);
                 appendResult("[发送失败][" + sendRes + "] " + link);
                 cmd("#@#action#back");
                 ThreadUtil.sleep(1500);
@@ -252,7 +253,7 @@ public class ScreenshotView extends FrameLayout {
                 }
             }
         } catch (Exception e) {
-            Log.e(TAG, "读取TXT失败");
+            LogHelper.e(TAG, "读取TXT失败");
             ExceptionUtil.getStackTrace(e);
         }
         return links;
@@ -269,9 +270,9 @@ public class ScreenshotView extends FrameLayout {
             FileOutputStream fos = new FileOutputStream(file, true);
             fos.write((line + "\n").getBytes(StandardCharsets.UTF_8));
             fos.close();
-            Log.d(TAG, "结果: " + line);
+            LogHelper.d(TAG, "结果: " + line);
         } catch (Exception e) {
-            Log.e(TAG, "写入结果失败");
+            LogHelper.e(TAG, "写入结果失败");
             ExceptionUtil.getStackTrace(e);
         }
     }
@@ -315,7 +316,7 @@ public class ScreenshotView extends FrameLayout {
         {
             MMKV kv = UI.getMMKV();
             kv.putString(msgid, "", 3600);
-            Log.d(TAG, "cmdWait " + msgid + "<-");
+            LogHelper.d(TAG, "cmdWait " + msgid + "<-");
 
             ScreenshotView.this.announceForAccessibility(msgid + "{msgid}" + str);
         }
@@ -325,14 +326,14 @@ public class ScreenshotView extends FrameLayout {
 
             MMKV kv = UI.getMMKV();
             String res = kv.getString(msgid, "");
-            Log.d(TAG, "cmdWait " + msgid + "<-" + res);
+            LogHelper.d(TAG, "cmdWait " + msgid + "<-" + res);
             if (StringUtil.isNotEmpty(res)) {
                 kv.remove(msgid);
                 return res;
             }
         }
 
-        Log.d(TAG, "cmdWait " + msgid + "<-timeout");
+        LogHelper.d(TAG, "cmdWait " + msgid + "<-timeout");
         return "timeout";
     }
 }

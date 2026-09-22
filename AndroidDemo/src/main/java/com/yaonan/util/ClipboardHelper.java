@@ -1,5 +1,7 @@
 package com.yaonan.util;
 
+import static com.yaonan.util.global.Global.TAG;
+
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -63,8 +65,9 @@ public class ClipboardHelper {
 
                     wm.addView(view, params);
                 } catch (Exception e) {
-                    latch.countDown();
-                    return;
+                LogHelper.e(TAG, "剪贴板焦点悬浮窗创建失败: " + e.getMessage());
+                latch.countDown();
+                return;
                 }
 
                 // 等待窗口焦点生效后写入
@@ -76,7 +79,9 @@ public class ClipboardHelper {
                         if (cur != null && cur.getItemCount() > 0) {
                             ok.set(text.equals(cur.getItemAt(0).getText() + ""));
                         }
-                    } catch (Exception ignored) {
+                        LogHelper.d(TAG, "剪贴板写入" + (ok.get() ? "成功" : "失败(读回不一致)"));
+                    } catch (Exception e) {
+                        LogHelper.e(TAG, "剪贴板写入异常: " + e.getMessage());
                     } finally {
                         try {
                             wm.removeView(view);
