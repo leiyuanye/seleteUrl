@@ -159,26 +159,64 @@ public class SelectToSpeakService extends AccessibilityService {
             Log.e(TAG, "输入 " + url);
             ThreadUtil.sleep(800);
 
-            // 点击"发送"按钮
-            AccessibilityNodeInfo root = getRootInActiveWindow();
-            if (root != null) {
-                List<AccessibilityNodeInfo> sendNodes = root.findAccessibilityNodeInfosByText("发送");
-                for (AccessibilityNodeInfo node : sendNodes) {
-                    if ("发送".equals(node.getText() + "") && (node.getClassName() + "").contains("Button")) {
-                        node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                        Log.e(TAG, "点击 发送");
-                        response(msgid, "success");
-                        return;
-                    }
+            // 点击"发送"并验证：发送成功后微信会清空输入框，
+            // 以此为准做闭环校验，未生效自动重试，最多尝试3次
+            for (int attempt = 1; attempt <= 3; attempt++) {
+                clickSendButton();
+
+                // 等待微信处理发送
+                ThreadUtil.sleep(1500);
+
+                // 验证：输入框中已无该链接即认为发送成功
+                AccessibilityNodeInfo freshEdit = findChatEditText();
+                String remainText = freshEdit == null ? "" : (freshEdit.getText() + "").trim();
+                if (!remainText.contains(url)) {
+                    Log.e(TAG, "发送成功(第" + attempt + "次尝试)");
+                    response(msgid, "success");
+                    return;
                 }
+                Log.e(TAG, "发送未生效(第" + attempt + "次尝试)，重试");
             }
-            Log.e(TAG, "发送链接失败: 未找到发送按钮");
+
+            Log.e(TAG, "发送链接失败: 点击发送后输入框仍未清空");
             response(msgid, "error");
         } catch (Exception e) {
             Log.e(TAG, "发送链接异常: " + e.getMessage());
             ExceptionUtil.getStackTrace(e);
             response(msgid, "error");
         }
+    }
+
+    /**
+     * 点击"发送"按钮：不依赖控件类型，文本为"发送"即可；
+     * 节点可点击时执行 ACTION_CLICK，否则按节点中心坐标手势点击（微信部分版本点击无效）。
+     */
+    private void clickSendButton() {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) {
+            Log.e(TAG, "点击发送失败: 无活动窗口");
+            return;
+        }
+        List<AccessibilityNodeInfo> sendNodes = root.findAccessibilityNodeInfosByText("发送");
+        for (AccessibilityNodeInfo node : sendNodes) {
+            if (!"发送".equals(node.getText() + "")) {
+                continue;
+            }
+            Rect rect = new Rect();
+            node.getBoundsInScreen(rect);
+            if (rect.isEmpty()) {
+                continue;
+            }
+            if (node.isClickable()) {
+                node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                Log.e(TAG, "点击 发送(click) " + rect);
+            } else {
+                _Tap(rect.centerX(), rect.centerY(), 100L, null);
+                Log.e(TAG, "点击 发送(tap) " + rect);
+            }
+            return;
+        }
+        Log.e(TAG, "点击发送失败: 未找到 发送 按钮");
     }
 
     /**
