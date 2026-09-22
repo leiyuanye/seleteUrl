@@ -154,30 +154,46 @@ public class SelectToSpeakService extends AccessibilityService {
      */
     private void sendLink(String url, String msgid) {
         try {
+            // 1、点击输入框聚焦（弹出键盘，确保粘贴目标就绪）
             AccessibilityNodeInfo editNode = findChatEditText();
             if (editNode == null) {
                 Log.e(TAG, "发送链接失败: 未找到聊天输入框");
                 response(msgid, "error");
                 return;
             }
+            Rect boxRect = new Rect();
+            editNode.getBoundsInScreen(boxRect);
+            _Tap(boxRect.centerX(), boxRect.centerY(), 50L, null);
+            ThreadUtil.sleep(800);
 
-            // 填入链接文本
-            Bundle arguments = new Bundle();
-            arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, url);
-            boolean ok = editNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments);
-            if (!ok) {
-                // 部分版本需先聚焦再填入
-                editNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
-                ThreadUtil.sleep(300);
-                ok = editNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments);
+            // 2、粘贴剪贴板内容（控制端发送命令前已将链接写入剪贴板）
+            //    粘贴走微信原生输入管线，等价于真实输入，会触发"发送"按钮显示
+            editNode = findChatEditText();
+            if (editNode != null) {
+                editNode.performAction(AccessibilityNodeInfo.ACTION_PASTE);
             }
-            if (!ok) {
-                Log.e(TAG, "发送链接失败: 填入文本失败");
+            ThreadUtil.sleep(1000);
+
+            // 3、粘贴未生效时退回 SET_TEXT 方式
+            if (!isInputFilled(url)) {
+                Log.e(TAG, "粘贴未生效，退回SET_TEXT方式");
+                editNode = findChatEditText();
+                if (editNode != null) {
+                    Bundle arguments = new Bundle();
+                    arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, url);
+                    editNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+                    ThreadUtil.sleep(300);
+                    editNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments);
+                    ThreadUtil.sleep(800);
+                }
+            }
+
+            if (!isInputFilled(url)) {
+                Log.e(TAG, "发送链接失败: 输入框未填入链接");
                 response(msgid, "error");
                 return;
             }
             Log.e(TAG, "输入 " + url);
-            ThreadUtil.sleep(800);
 
             // 点击"发送"并验证：发送成功后微信会清空输入框，以此为准做闭环校验。
             // 每轮两种方式：1无障碍节点点击；2截屏+OCR查找"发送"文字坐标后手势点击。
@@ -226,6 +242,20 @@ public class SelectToSpeakService extends AccessibilityService {
             return true;
         }
         return !(edit.getText() + "").contains(url);
+    }
+
+    /**
+     * 验证输入框中是否已填入该链接。
+     *
+     * @param url 链接
+     * @return 是否已填入
+     */
+    private boolean isInputFilled(String url) {
+        AccessibilityNodeInfo edit = findChatEditText();
+        if (edit == null) {
+            return false;
+        }
+        return (edit.getText() + "").contains(url);
     }
 
     /**

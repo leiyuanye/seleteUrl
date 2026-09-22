@@ -18,6 +18,7 @@ import com.google.android.accessibility.selecttospeak.SelectToSpeakService;
 import com.tencent.mmkv.MMKV;
 import com.yaonan.App;
 import com.yaonan.R;
+import com.yaonan.util.ClipboardHelper;
 import com.yaonan.util.codec.Codec;
 import com.yaonan.util.exception.ExceptionUtil;
 import com.yaonan.util.jna.UI;
@@ -182,8 +183,14 @@ public class ScreenshotView extends FrameLayout {
             UI.invokeLater(() -> textView.setText(index + "/" + links.size()));
             Log.e(TAG, "===== [" + index + "/" + links.size() + "] " + link);
 
-            // 1、发送链接（同步等待结果）
-            String sendRes = cmdWait("#@#发送链接#" + link, 15);
+            // 1、写入剪贴板（无障碍服务在微信内通过粘贴输入，粘贴会触发"发送"按钮显示）
+            boolean clipOk = ClipboardHelper.setString(link);
+            if (!clipOk) {
+                Log.e(TAG, "剪贴板写入失败，服务端将退回SET_TEXT方式");
+            }
+
+            // 2、发送链接（同步等待结果）
+            String sendRes = cmdWait("#@#发送链接#" + link, 20);
             if (!"success".equals(sendRes)) {
                 Log.e(TAG, "发送失败: " + sendRes);
                 appendResult("[发送失败][" + sendRes + "] " + link);
