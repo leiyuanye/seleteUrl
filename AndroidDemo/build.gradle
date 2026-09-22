@@ -46,4 +46,7 @@ dependencies {
 //    androidTestImplementation libs.androidx.espresso.core
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.22.2'
     implementation 'com.tencent:mmkv:2.3.0'
+    // ML Kit 中文文字识别（离线），用于截屏查找"发送"等文字坐标
+    implementation 'com.google.mlkit:text-recognition:16.0.1'
+    implementation 'com.google.mlkit:text-recognition-chinese:16.0.1'
 }

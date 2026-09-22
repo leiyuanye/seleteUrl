@@ -4,13 +4,22 @@ import static com.yaonan.util.global.Global.TAG;
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
+import android.graphics.Bitmap;
 import android.graphics.Path;
 import android.graphics.Rect;
+import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 
+import androidx.annotation.NonNull;
+
+import com.google.mlkit.vision.common.InputImage;
+import com.google.mlkit.vision.text.Text;
+import com.google.mlkit.vision.text.TextRecognition;
+import com.google.mlkit.vision.text.TextRecognizer;
+import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions;
 import com.tencent.mmkv.MMKV;
 import com.yaonan.util.codec.Codec;
 import com.yaonan.util.exception.ExceptionUtil;
@@ -23,6 +32,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 无障碍服务实现类（注册为 SelectToSpeak，实际作为自动化脚本执行器使用）。
@@ -45,6 +59,9 @@ public class SelectToSpeakService extends AccessibilityService {
     private static final String[] RISK_KEYWORDS = {
             "诱导分享", "长按网址", "已停止访问", "谨慎访问", "安全性", "存在风险"
     };
+
+    /** 截屏回调执行器（takeScreenshot 要求提供 Executor，且回调不能在主线程死等） */
+    private static final ExecutorService SCREENSHOT_EXECUTOR = Executors.newSingleThreadExecutor();
 
     /**
      * 服务连接成功回调：无障碍服务启动后由系统调用，当前仅调用父类默认实现，预留服务启动后的初始化扩展点。
@@ -80,6 +97,8 @@ public class SelectToSpeakService extends AccessibilityService {
                     msgid = cmds[0];
                     cmd = cmds[1];
                 }
+                // lambda 中引用需要 effectively final
+                final String fMsgid = msgid;
 
                 if (cmd != null && cmd.startsWith("#@#")) {
                     Log.e(TAG, cmd);
@@ -107,13 +126,14 @@ public class SelectToSpeakService extends AccessibilityService {
 
                     } else if (cmd.startsWith("#@#发送链接#")) { // 发送链接
                         // 将链接填入聊天输入框并点击"发送"，结果通过 msgid 同步回传
+                        // 内部含截屏OCR兜底点击与多次等待，放后台线程执行，避免阻塞主线程
                         String url = cmd.substring("#@#发送链接#".length());
-                        sendLink(url, msgid);
+                        ThreadUtil.async(() -> sendLink(url, fMsgid));
 
                     } else if (cmd.startsWith("#@#检查链接#")) { // 检查链接
                         // 点击刚发送的链接消息，等待页面加载后扫描风险关键词，结果通过 msgid 同步回传
                         String url = cmd.substring("#@#检查链接#".length());
-                        checkLink(url, msgid);
+                        ThreadUtil.async(() -> checkLink(url, fMsgid));
 
                     }
                 }
@@ -159,32 +179,165 @@ public class SelectToSpeakService extends AccessibilityService {
             Log.e(TAG, "输入 " + url);
             ThreadUtil.sleep(800);
 
-            // 点击"发送"并验证：发送成功后微信会清空输入框，
-            // 以此为准做闭环校验，未生效自动重试，最多尝试3次
+            // 点击"发送"并验证：发送成功后微信会清空输入框，以此为准做闭环校验。
+            // 每轮两种方式：1无障碍节点点击；2截屏+OCR查找"发送"文字坐标后手势点击。
             for (int attempt = 1; attempt <= 3; attempt++) {
+                // 方式1：无障碍节点点击
                 clickSendButton();
-
-                // 等待微信处理发送
                 ThreadUtil.sleep(1500);
-
-                // 验证：输入框中已无该链接即认为发送成功
-                AccessibilityNodeInfo freshEdit = findChatEditText();
-                String remainText = freshEdit == null ? "" : (freshEdit.getText() + "").trim();
-                if (!remainText.contains(url)) {
-                    Log.e(TAG, "发送成功(第" + attempt + "次尝试)");
+                if (isInputCleared(url)) {
+                    Log.e(TAG, "发送成功-节点点击(第" + attempt + "次尝试)");
                     response(msgid, "success");
                     return;
+                }
+
+                // 方式2：截屏 + OCR 查找"发送"文字坐标，手势点击
+                if (ocrTapText("发送")) {
+                    Log.e(TAG, "OCR已点击发送(第" + attempt + "次尝试)");
+                    ThreadUtil.sleep(1500);
+                    if (isInputCleared(url)) {
+                        Log.e(TAG, "发送成功-OCR点击(第" + attempt + "次尝试)");
+                        response(msgid, "success");
+                        return;
+                    }
                 }
                 Log.e(TAG, "发送未生效(第" + attempt + "次尝试)，重试");
             }
 
-            Log.e(TAG, "发送链接失败: 点击发送后输入框仍未清空");
+            Log.e(TAG, "发送链接失败: 多次尝试后输入框仍未清空");
             response(msgid, "error");
         } catch (Exception e) {
             Log.e(TAG, "发送链接异常: " + e.getMessage());
             ExceptionUtil.getStackTrace(e);
             response(msgid, "error");
         }
+    }
+
+    /**
+     * 验证输入框是否已清空（不再包含该链接）：发送成功后微信会清空输入框；
+     * 输入框节点不存在时也视为已发送（界面已切换）。
+     *
+     * @param url 刚填入的链接
+     * @return 是否已发送
+     */
+    private boolean isInputCleared(String url) {
+        AccessibilityNodeInfo edit = findChatEditText();
+        if (edit == null) {
+            return true;
+        }
+        return !(edit.getText() + "").contains(url);
+    }
+
+    /**
+     * 截屏 + OCR 查找目标文字的坐标并手势点击（无障碍服务 takeScreenshot，无需录屏授权）。
+     *
+     * <p>流程：takeScreenshot 截取整屏 → ML Kit 中文识别 → 找到包含目标文字的元素 →
+     * 手势点击其中心坐标。仅支持 Android 11+（takeScreenshot 为 API 30 新增）。</p>
+     *
+     * @param target 目标文字（如"发送"）
+     * @return 是否成功找到并点击
+     */
+    private boolean ocrTapText(String target) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            Log.e(TAG, "OCR点击跳过: 需要Android 11+");
+            return false;
+        }
+        try {
+            Log.e(TAG, "OCR截屏查找[" + target + "]...");
+            CountDownLatch latch = new CountDownLatch(1);
+            AtomicBoolean tapped = new AtomicBoolean(false);
+
+            takeScreenshot(getDisplay().getDisplayId(), SCREENSHOT_EXECUTOR, new TakeScreenshotCallback() {
+                @Override
+                public void onSuccess(@NonNull ScreenshotResult result) {
+                    try {
+                        // HardwareBitmap 转 software Bitmap 供 ML Kit 识别
+                        Bitmap hwBitmap = Bitmap.wrapHardwareBuffer(
+                                result.getHardwareBuffer(), result.getColorSpace());
+                        if (hwBitmap == null) {
+                            throw new IllegalStateException("截屏转换失败");
+                        }
+                        Bitmap softBitmap = hwBitmap.copy(Bitmap.Config.ARGB_8888, false);
+                        hwBitmap.recycle();
+                        result.getHardwareBuffer().close();
+
+                        InputImage image = InputImage.fromBitmap(softBitmap, 0);
+                        TextRecognizer recognizer = TextRecognition.getClient(
+                                new ChineseTextRecognizerOptions.Builder().build());
+                        recognizer.process(image)
+                                .addOnSuccessListener(visionText -> {
+                                    Rect rect = findTextRect(visionText, target);
+                                    if (rect != null) {
+                                        Log.e(TAG, "OCR命中[" + target + "] " + rect);
+                                        _Tap(rect.centerX(), rect.centerY(), 100L, null);
+                                        tapped.set(true);
+                                    } else {
+                                        Log.e(TAG, "OCR未找到[" + target + "]");
+                                    }
+                                })
+                                .addOnCompleteListener(task -> {
+                                    recognizer.close();
+                                    latch.countDown();
+                                });
+                    } catch (Exception e) {
+                        Log.e(TAG, "OCR处理异常: " + e.getMessage());
+                        latch.countDown();
+                    }
+                }
+
+                @Override
+                public void onFailure(int errorCode) {
+                    Log.e(TAG, "OCR截屏失败: code=" + errorCode);
+                    latch.countDown();
+                }
+            });
+
+            // 最多等待8秒识别完成
+            latch.await(8, TimeUnit.SECONDS);
+            return tapped.get();
+        } catch (Exception e) {
+            Log.e(TAG, "OCR点击异常: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 在 OCR 识别结果中查找包含目标文字的元素边界（优先精确匹配，其次包含匹配）。
+     *
+     * @param visionText ML Kit 识别结果
+     * @param target     目标文字
+     * @return 目标文字在屏幕上的边界（未找到返回 null）
+     */
+    private Rect findTextRect(Text visionText, String target) {
+        Rect exactRect = null;
+        Rect containsRect = null;
+        for (Text.TextBlock block : visionText.getTextBlocks()) {
+            for (Text.Line line : block.getLines()) {
+                if (target.equals(line.getText().trim()) && line.getBoundingBox() != null) {
+                    exactRect = line.getBoundingBox();
+                }
+                for (Text.Element element : line.getElements()) {
+                    String text = element.getText().trim();
+                    Rect box = element.getBoundingBox();
+                    if (box == null) {
+                        continue;
+                    }
+                    if (target.equals(text)) {
+                        exactRect = box;
+                    } else if (text.contains(target)) {
+                        containsRect = box;
+                    }
+                }
+            }
+        }
+        if (exactRect != null) {
+            return exactRect;
+        }
+        if (containsRect != null) {
+            // 包含匹配时取文字所在区域中间偏左的部分（如"发送"在"发送(S)"中）
+            return containsRect;
+        }
+        return null;
     }
 
     /**
