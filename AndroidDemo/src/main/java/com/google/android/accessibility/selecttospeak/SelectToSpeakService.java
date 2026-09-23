@@ -10,6 +10,7 @@ import android.graphics.Rect;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.Display;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 
@@ -244,8 +245,10 @@ public class SelectToSpeakService extends AccessibilityService {
     }
 
     /**
-     * 验证输入框是否已清空（不再包含该链接）：发送成功后微信会清空输入框；
-     * 输入框节点不存在时也视为已发送（界面已切换）。
+     * 验证输入框是否已清空（不再包含该链接）：发送成功后微信会清空输入框。
+     *
+     * <p>注意：输入框节点找不到≠已发送（可能是粘贴后布局瞬时刷新），
+     * 必须延迟重查确认，否则会产生"假成功"。</p>
      *
      * @param url 刚填入的链接
      * @return 是否已发送
@@ -253,7 +256,13 @@ public class SelectToSpeakService extends AccessibilityService {
     private boolean isInputCleared(String url) {
         AccessibilityNodeInfo edit = findChatEditText();
         if (edit == null) {
-            return true;
+            // 节点暂时找不到，等待布局稳定后重查一次
+            ThreadUtil.sleep(600);
+            edit = findChatEditText();
+            if (edit == null) {
+                LogHelper.e(TAG, "验证发送: 输入框节点不存在，无法确认已发送");
+                return false;
+            }
         }
         return !(edit.getText() + "").contains(url);
     }
@@ -291,7 +300,7 @@ public class SelectToSpeakService extends AccessibilityService {
             CountDownLatch latch = new CountDownLatch(1);
             AtomicBoolean tapped = new AtomicBoolean(false);
 
-            takeScreenshot(getDisplay().getDisplayId(), SCREENSHOT_EXECUTOR, new TakeScreenshotCallback() {
+            takeScreenshot(Display.DEFAULT_DISPLAY, SCREENSHOT_EXECUTOR, new TakeScreenshotCallback() {
                 @Override
                 public void onSuccess(@NonNull ScreenshotResult result) {
                     try {
@@ -385,8 +394,9 @@ public class SelectToSpeakService extends AccessibilityService {
     }
 
     /**
-     * 点击"发送"按钮：不依赖控件类型，文本为"发送"即可；
-     * 节点可点击时执行 ACTION_CLICK，否则按节点中心坐标手势点击（微信部分版本点击无效）。
+     * 点击"发送"按钮：不依赖控件类型与精确文本（"发送"/含"发送"均尝试），
+     * 优先节点 ACTION_CLICK，否则按节点中心坐标手势点击。
+     * 找不到时输出所有含"发送"文本的节点诊断信息，便于定位按钮特征。
      */
     private void clickSendButton() {
         AccessibilityNodeInfo root = getRootInActiveWindow();
@@ -395,25 +405,42 @@ public class SelectToSpeakService extends AccessibilityService {
             return;
         }
         List<AccessibilityNodeInfo> sendNodes = root.findAccessibilityNodeInfosByText("发送");
+        AccessibilityNodeInfo fallback = null;
+        Rect fallbackRect = null;
+        StringBuilder diag = new StringBuilder();
         for (AccessibilityNodeInfo node : sendNodes) {
-            if (!"发送".equals(node.getText() + "")) {
-                continue;
-            }
+            String text = node.getText() + "";
             Rect rect = new Rect();
             node.getBoundsInScreen(rect);
+            if (diag.length() > 0) {
+                diag.append(" | ");
+            }
+            diag.append(text).append(rect).append(node.getClassName());
             if (rect.isEmpty()) {
                 continue;
             }
-            if (node.isClickable()) {
-                node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                LogHelper.e(TAG, "点击 发送(click) " + rect);
-            } else {
-                _Tap(rect.centerX(), rect.centerY(), 100L, null);
-                LogHelper.e(TAG, "点击 发送(tap) " + rect);
+            if ("发送".equals(text.trim())) {
+                if (node.isClickable()) {
+                    node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                    LogHelper.e(TAG, "点击 发送(click) " + rect);
+                } else {
+                    _Tap(rect.centerX(), rect.centerY(), 100L, null);
+                    LogHelper.e(TAG, "点击 发送(tap) " + rect);
+                }
+                return;
             }
+            if (fallback == null) {
+                fallback = node;
+                fallbackRect = rect;
+            }
+        }
+        // 无精确"发送"时，点击含"发送"文本的候选节点（按坐标）
+        if (fallback != null && fallbackRect != null) {
+            _Tap(fallbackRect.centerX(), fallbackRect.centerY(), 100L, null);
+            LogHelper.e(TAG, "点击 发送(候选tap) " + fallbackRect + " " + (fallback.getText() + ""));
             return;
         }
-        LogHelper.e(TAG, "点击发送失败: 未找到 发送 按钮");
+        LogHelper.e(TAG, "点击发送失败: 未找到发送按钮, 候选节点[" + diag + "]");
     }
 
     /**
@@ -430,13 +457,23 @@ public class SelectToSpeakService extends AccessibilityService {
                 return;
             }
 
-            // 在聊天记录中查找该链接的消息节点并点击（链接消息以 url 文本展示）
-            List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByText(url);
+            // 在聊天记录中查找该链接的消息节点并点击（链接消息以 url 文本展示）。
+            // 消息气泡渲染有延迟，重试查找最多6秒
             AccessibilityNodeInfo linkNode = null;
-            for (AccessibilityNodeInfo node : nodes) {
-                if (url.equals((node.getText() + "").trim())) {
-                    linkNode = node;
-                    break;
+            for (int retry = 0; retry < 6 && linkNode == null; retry++) {
+                if (retry > 0) {
+                    ThreadUtil.sleep(1000);
+                }
+                root = getRootInActiveWindow();
+                if (root == null) {
+                    continue;
+                }
+                List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByText(url);
+                for (AccessibilityNodeInfo node : nodes) {
+                    if (url.equals((node.getText() + "").trim())) {
+                        linkNode = node;
+                        break;
+                    }
                 }
             }
             if (linkNode == null) {

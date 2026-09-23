@@ -190,8 +190,8 @@ public class ScreenshotView extends FrameLayout {
                 LogHelper.e(TAG, "剪贴板写入失败，服务端将退回SET_TEXT方式");
             }
 
-            // 2、发送链接（同步等待结果）
-            String sendRes = cmdWait("#@#发送链接#" + link, 20);
+            // 2、发送链接（同步等待结果，三级输入+重试耗时较长，放宽到30s）
+            String sendRes = cmdWait("#@#发送链接#" + link, 30);
             if (!"success".equals(sendRes)) {
                 LogHelper.e(TAG, "发送失败: " + sendRes);
                 appendResult("[发送失败][" + sendRes + "] " + link);
