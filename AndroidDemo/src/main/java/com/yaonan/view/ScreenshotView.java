@@ -195,8 +195,7 @@ public class ScreenshotView extends FrameLayout {
             if (!"success".equals(sendRes)) {
                 LogHelper.e(TAG, "发送失败: " + sendRes);
                 appendResult("[发送失败][" + sendRes + "] " + link);
-                cmd("#@#action#back");
-                ThreadUtil.sleep(1500);
+                // 仍处于聊天界面，无需返回（按返回会退出会话导致后续链接失败）
                 continue;
             }
 
@@ -204,7 +203,7 @@ public class ScreenshotView extends FrameLayout {
             ThreadUtil.sleep(2000);
 
             // 3、点击链接并扫描风险关键词（同步等待结果）
-            String checkRes = cmdWait("#@#检查链接#" + link, 25);
+            String checkRes = cmdWait("#@#检查链接#" + link, 40);
             if (checkRes.startsWith("risk")) {
                 riskCount++;
                 String keyword = checkRes.substring("risk:".length());
@@ -217,10 +216,18 @@ public class ScreenshotView extends FrameLayout {
                 appendResult("[异常-" + checkRes + "] " + link);
             }
 
-            // 4、从网页返回聊天界面
-            ThreadUtil.sleep(500);
-            cmd("#@#action#back");
-            ThreadUtil.sleep(2000);
+            // 4、仅当打开过网页时才需要从网页返回聊天界面
+            //    nofind/notopen 表示未发生页面跳转，此时按返回会退出聊天会话，导致后续链接失败
+            boolean pageOpened = checkRes.startsWith("risk")
+                    || "normal".equals(checkRes)
+                    || "error".equals(checkRes);
+            if (pageOpened) {
+                ThreadUtil.sleep(500);
+                cmd("#@#action#back");
+                ThreadUtil.sleep(2000);
+            } else {
+                LogHelper.e(TAG, "未发生页面跳转(" + checkRes + ")，无需返回");
+            }
         }
 
         String summary = "检测完成：共" + links.size() + "条，风险" + riskCount + "条\n结果已保存到 check_result.txt";

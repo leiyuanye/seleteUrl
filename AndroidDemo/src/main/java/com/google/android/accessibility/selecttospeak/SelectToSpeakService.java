@@ -38,7 +38,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 无障碍服务实现类（注册为 SelectToSpeak，实际作为自动化脚本执行器使用）。
@@ -284,9 +284,6 @@ public class SelectToSpeakService extends AccessibilityService {
     /**
      * 截屏 + OCR 查找目标文字的坐标并手势点击（无障碍服务 takeScreenshot，无需录屏授权）。
      *
-     * <p>流程：takeScreenshot 截取整屏 → ML Kit 中文识别 → 找到包含目标文字的元素 →
-     * 手势点击其中心坐标。仅支持 Android 11+（takeScreenshot 为 API 30 新增）。</p>
-     *
      * @param target 目标文字（如"发送"）
      * @return 是否成功找到并点击
      */
@@ -297,100 +294,22 @@ public class SelectToSpeakService extends AccessibilityService {
         }
         try {
             LogHelper.e(TAG, "OCR截屏查找[" + target + "]...");
-            CountDownLatch latch = new CountDownLatch(1);
-            AtomicBoolean tapped = new AtomicBoolean(false);
-
-            takeScreenshot(Display.DEFAULT_DISPLAY, SCREENSHOT_EXECUTOR, new TakeScreenshotCallback() {
-                @Override
-                public void onSuccess(@NonNull ScreenshotResult result) {
-                    try {
-                        // HardwareBitmap 转 software Bitmap 供 ML Kit 识别
-                        Bitmap hwBitmap = Bitmap.wrapHardwareBuffer(
-                                result.getHardwareBuffer(), result.getColorSpace());
-                        if (hwBitmap == null) {
-                            throw new IllegalStateException("截屏转换失败");
-                        }
-                        Bitmap softBitmap = hwBitmap.copy(Bitmap.Config.ARGB_8888, false);
-                        hwBitmap.recycle();
-                        result.getHardwareBuffer().close();
-
-                        InputImage image = InputImage.fromBitmap(softBitmap, 0);
-                        TextRecognizer recognizer = TextRecognition.getClient(
-                                new ChineseTextRecognizerOptions.Builder().build());
-                        recognizer.process(image)
-                                .addOnSuccessListener(visionText -> {
-                                    Rect rect = findTextRect(visionText, target);
-                                    if (rect != null) {
-                                        LogHelper.e(TAG, "OCR命中[" + target + "] " + rect);
-                                        _Tap(rect.centerX(), rect.centerY(), 100L, null);
-                                        tapped.set(true);
-                                    } else {
-                                        LogHelper.e(TAG, "OCR未找到[" + target + "]");
-                                    }
-                                })
-                                .addOnCompleteListener(task -> {
-                                    recognizer.close();
-                                    latch.countDown();
-                                });
-                    } catch (Exception e) {
-                        LogHelper.e(TAG, "OCR处理异常: " + e.getMessage());
-                        latch.countDown();
-                    }
-                }
-
-                @Override
-                public void onFailure(int errorCode) {
-                    LogHelper.e(TAG, "OCR截屏失败: code=" + errorCode);
-                    latch.countDown();
-                }
-            });
-
-            // 最多等待8秒识别完成
-            latch.await(8, TimeUnit.SECONDS);
-            return tapped.get();
+            Text visionText = ocrCaptureText();
+            if (visionText == null) {
+                return false;
+            }
+            Rect rect = findTextRect(visionText, target, false);
+            if (rect != null) {
+                LogHelper.e(TAG, "OCR命中[" + target + "] " + rect);
+                _Tap(rect.centerX(), rect.centerY(), 100L, null);
+                return true;
+            }
+            LogHelper.e(TAG, "OCR未找到[" + target + "]");
+            return false;
         } catch (Exception e) {
             LogHelper.e(TAG, "OCR点击异常: " + e.getMessage());
             return false;
         }
-    }
-
-    /**
-     * 在 OCR 识别结果中查找包含目标文字的元素边界（优先精确匹配，其次包含匹配）。
-     *
-     * @param visionText ML Kit 识别结果
-     * @param target     目标文字
-     * @return 目标文字在屏幕上的边界（未找到返回 null）
-     */
-    private Rect findTextRect(Text visionText, String target) {
-        Rect exactRect = null;
-        Rect containsRect = null;
-        for (Text.TextBlock block : visionText.getTextBlocks()) {
-            for (Text.Line line : block.getLines()) {
-                if (target.equals(line.getText().trim()) && line.getBoundingBox() != null) {
-                    exactRect = line.getBoundingBox();
-                }
-                for (Text.Element element : line.getElements()) {
-                    String text = element.getText().trim();
-                    Rect box = element.getBoundingBox();
-                    if (box == null) {
-                        continue;
-                    }
-                    if (target.equals(text)) {
-                        exactRect = box;
-                    } else if (text.contains(target)) {
-                        containsRect = box;
-                    }
-                }
-            }
-        }
-        if (exactRect != null) {
-            return exactRect;
-        }
-        if (containsRect != null) {
-            // 包含匹配时取文字所在区域中间偏左的部分（如"发送"在"发送(S)"中）
-            return containsRect;
-        }
-        return null;
     }
 
     /**
@@ -444,74 +363,59 @@ public class SelectToSpeakService extends AccessibilityService {
     }
 
     /**
-     * 检查链接：点击聊天中该 url 的消息，等待页面加载后扫描所有节点文本中的风险关键词。
+     * 检查链接：OCR 在聊天列表中找到刚发送的链接消息并点击，等待页面加载后
+     * OCR 扫描整页文本中的风险关键词。
+     *
+     * <p>微信 8.0.52+ 对无障碍节点文本做了混淆（节点里读不到任何文本），
+     * 因此查找与扫描全部基于截屏 OCR，不依赖节点文本。</p>
+     *
+     * 应答：normal / risk:&lt;关键词&gt; / nofind(聊天中未找到链接消息，未发生跳转) / notopen(点击了但未离开聊天) / error
      *
      * @param url   待检查的链接
      * @param msgid 同步应答id
      */
     private void checkLink(String url, String msgid) {
         try {
-            AccessibilityNodeInfo root = getRootInActiveWindow();
-            if (root == null) {
-                response(msgid, "nofind");
-                return;
-            }
-
-            // 在聊天记录中查找该链接的消息节点并点击（链接消息以 url 文本展示）。
-            // 消息气泡渲染有延迟，重试查找最多6秒
-            AccessibilityNodeInfo linkNode = null;
-            for (int retry = 0; retry < 6 && linkNode == null; retry++) {
+            // 1、OCR 在聊天列表中查找链接消息（消息气泡渲染有延迟，最多重试5次）
+            Rect linkRect = null;
+            for (int retry = 0; retry < 5 && linkRect == null; retry++) {
                 if (retry > 0) {
-                    ThreadUtil.sleep(1000);
+                    ThreadUtil.sleep(1500);
                 }
-                root = getRootInActiveWindow();
-                if (root == null) {
-                    continue;
-                }
-                List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByText(url);
-                for (AccessibilityNodeInfo node : nodes) {
-                    if (url.equals((node.getText() + "").trim())) {
-                        linkNode = node;
-                        break;
-                    }
-                }
+                linkRect = ocrFindTextRect(url, true);
             }
-            if (linkNode == null) {
+            if (linkRect == null) {
                 LogHelper.e(TAG, "检查链接失败: 聊天中未找到 " + url);
                 response(msgid, "nofind");
                 return;
             }
 
-            Rect rect = new Rect();
-            linkNode.getBoundsInScreen(rect);
-            _Tap(rect.centerX(), rect.centerY(), 100L, null);
-            LogHelper.e(TAG, "点击链接 " + rect);
+            // 2、点击链接消息打开网页（取消息中心点，避免点到边角）
+            _Tap(linkRect.centerX(), linkRect.centerY(), 100L, null);
+            LogHelper.e(TAG, "点击链接 " + linkRect);
 
-            // 等待页面加载（参考老仓库H5监控的10s，这里6s折中）
+            // 3、等待页面加载（参考老仓库H5监控的10s，这里6s折中）
             ThreadUtil.sleep(6000);
 
-            // 校验是否真的离开了聊天界面：输入框仍在说明网页未打开成功
+            // 4、校验是否真的离开了聊天界面：输入框仍在说明网页未打开成功
             if (findChatEditText() != null) {
                 LogHelper.e(TAG, "检查链接失败: 点击后仍在聊天界面(网页未打开)");
-                response(msgid, "nofind");
+                response(msgid, "notopen");
                 return;
             }
 
-            // 扫描当前页面所有节点文本中的风险关键词
-            List<AccessibilityNodeInfo> allNodes = findNodeInfos();
-            for (AccessibilityNodeInfo node : allNodes) {
-                CharSequence textCs = node.getText();
-                if (textCs == null) {
-                    continue;
-                }
-                String text = textCs.toString();
+            // 5、OCR 扫描整页文本中的风险关键词
+            Text pageText = ocrCaptureText();
+            if (pageText != null) {
                 for (String keyword : RISK_KEYWORDS) {
-                    if (text.contains(keyword)) {
-                        LogHelper.e(TAG, "风险页面: 命中关键词[" + keyword + "] " + text);
+                    if (containsNormalized(pageText, keyword)) {
+                        LogHelper.e(TAG, "风险页面: 命中关键词[" + keyword + "]");
                         response(msgid, "risk:" + keyword);
                         return;
                     }
                 }
+            } else {
+                LogHelper.e(TAG, "页面OCR失败，按正常处理");
             }
 
             LogHelper.e(TAG, "页面正常");
@@ -521,6 +425,141 @@ public class SelectToSpeakService extends AccessibilityService {
             ExceptionUtil.getStackTrace(e);
             response(msgid, "error");
         }
+    }
+
+    /**
+     * 截屏并 OCR 识别整屏文本（同步等待）。
+     *
+     * @return 识别结果（失败返回 null）
+     */
+    private Text ocrCaptureText() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            LogHelper.e(TAG, "OCR跳过: 需要Android 11+");
+            return null;
+        }
+        try {
+            CountDownLatch latch = new CountDownLatch(1);
+            AtomicReference<Text> resultRef = new AtomicReference<>(null);
+
+            takeScreenshot(Display.DEFAULT_DISPLAY, SCREENSHOT_EXECUTOR, new TakeScreenshotCallback() {
+                @Override
+                public void onSuccess(@NonNull ScreenshotResult result) {
+                    try {
+                        Bitmap hwBitmap = Bitmap.wrapHardwareBuffer(
+                                result.getHardwareBuffer(), result.getColorSpace());
+                        if (hwBitmap == null) {
+                            throw new IllegalStateException("截屏转换失败");
+                        }
+                        Bitmap softBitmap = hwBitmap.copy(Bitmap.Config.ARGB_8888, false);
+                        hwBitmap.recycle();
+                        result.getHardwareBuffer().close();
+
+                        InputImage image = InputImage.fromBitmap(softBitmap, 0);
+                        TextRecognizer recognizer = TextRecognition.getClient(
+                                new ChineseTextRecognizerOptions.Builder().build());
+                        recognizer.process(image)
+                                .addOnSuccessListener(visionText -> resultRef.set(visionText))
+                                .addOnCompleteListener(task -> {
+                                    recognizer.close();
+                                    latch.countDown();
+                                });
+                    } catch (Exception e) {
+                        LogHelper.e(TAG, "OCR处理异常: " + e.getMessage());
+                        latch.countDown();
+                    }
+                }
+
+                @Override
+                public void onFailure(int errorCode) {
+                    LogHelper.e(TAG, "OCR截屏失败: code=" + errorCode);
+                    latch.countDown();
+                }
+            });
+
+            latch.await(10, TimeUnit.SECONDS);
+            return resultRef.get();
+        } catch (Exception e) {
+            LogHelper.e(TAG, "OCR截屏异常: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 在 OCR 识别结果中查找目标文字，返回其屏幕边界。
+     *
+     * @param visionText ML Kit 识别结果
+     * @param target     目标文字
+     * @param last       true取最下方匹配（最新消息），false取最上方匹配
+     * @return 目标文字的屏幕边界（未找到返回 null）
+     */
+    private Rect findTextRect(Text visionText, String target, boolean last) {
+        Rect found = null;
+        String normTarget = normalizeText(target);
+        if (normTarget.isEmpty()) {
+            return null;
+        }
+        for (Text.TextBlock block : visionText.getTextBlocks()) {
+            for (Text.Line line : block.getLines()) {
+                String normLine = normalizeText(line.getText());
+                Rect box = line.getBoundingBox();
+                if (box == null || box.isEmpty()) {
+                    continue;
+                }
+                if (normLine.contains(normTarget)) {
+                    // 取最上/最下方匹配；目标为链接时缩窄点击范围到匹配区域中部，避免点到气泡边角
+                    if (found == null || (last ? box.top > found.top : box.top < found.top)) {
+                        found = box;
+                    }
+                }
+            }
+        }
+        return found;
+    }
+
+    /**
+     * 文本归一化：去除空格，用于匹配 OCR 因排版产生的空格差异。
+     */
+    private String normalizeText(String s) {
+        return s == null ? "" : s.replace(" ", "").replace("\u00A0", "").trim();
+    }
+
+    /**
+     * 判断 OCR 全文是否包含关键词（归一化后匹配）。
+     */
+    private boolean containsNormalized(Text visionText, String keyword) {
+        String normKeyword = normalizeText(keyword);
+        for (Text.TextBlock block : visionText.getTextBlocks()) {
+            if (normalizeText(block.getText()).contains(normKeyword)) {
+                return true;
+            }
+            for (Text.Line line : block.getLines()) {
+                if (normalizeText(line.getText()).contains(normKeyword)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * OCR 查找目标文字在屏幕上的位置。
+     *
+     * @param target 目标文字（自动去除协议头以兼容聊天中链接的显示形式）
+     * @param last   true取最下方匹配（最新消息）
+     * @return 屏幕边界（未找到返回 null）
+     */
+    private Rect ocrFindTextRect(String target, boolean last) {
+        // 链接消息在聊天中可能不带协议头显示，匹配时去除 https:// 前缀
+        String matchTarget = target.replaceFirst("^https?://", "");
+        Text visionText = ocrCaptureText();
+        if (visionText == null) {
+            return null;
+        }
+        Rect rect = findTextRect(visionText, matchTarget, last);
+        if (rect != null) {
+            LogHelper.e(TAG, "OCR命中[" + matchTarget + "] " + rect);
+        }
+        return rect;
     }
 
     /**
