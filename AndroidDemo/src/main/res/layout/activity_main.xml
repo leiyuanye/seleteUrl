@@ -413,7 +413,7 @@
             <Button
                     android:id="@+id/btn_about"
                     style="@style/BtnDisabled"
-                    android:text="linkcheck1.0" />
+                    android:text="linkcheck1.1" />
 
             <LinearLayout
                 android:layout_width="0dp"
