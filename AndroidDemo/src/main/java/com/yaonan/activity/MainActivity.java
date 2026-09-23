@@ -131,8 +131,8 @@ public class MainActivity extends AppCompatActivity {
         refreshKeywordSummary();
         binding.tvKeywordsSummary.setOnClickListener(v -> showKeywordsDialog());
         binding.etCheckWait.setText(String.valueOf(
-                kv.decodeInt(com.yaonan.util.global.Global.KEY_CHECK_WAIT_SEC,
-                        com.yaonan.util.global.Global.DEFAULT_CHECK_WAIT_SEC)));
+                kv.decodeInt(com.yaonan.util.global.Global.KEY_STEP_INTERVAL_SEC,
+                        com.yaonan.util.global.Global.DEFAULT_STEP_INTERVAL_SEC)));
         binding.btnSettingsSave.setOnClickListener(v -> saveSettings());
 
         // 运行日志：分享（通过微信/QQ等发送日志文件）
@@ -273,7 +273,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        // 检查时长：校验范围 3~60 秒，非法回退默认
+        // 步骤间隔：校验范围 1~60 秒，非法回退默认
         String waitStr = binding.etCheckWait.getText() == null
                 ? "" : binding.etCheckWait.getText().toString().trim();
         int waitSec;
@@ -282,18 +282,18 @@ public class MainActivity extends AppCompatActivity {
         } catch (NumberFormatException e) {
             waitSec = -1;
         }
-        if (waitSec < com.yaonan.util.global.Global.MIN_CHECK_WAIT_SEC
-                || waitSec > com.yaonan.util.global.Global.MAX_CHECK_WAIT_SEC) {
-            UI.alert("检查时长须为 " + com.yaonan.util.global.Global.MIN_CHECK_WAIT_SEC
-                    + "~" + com.yaonan.util.global.Global.MAX_CHECK_WAIT_SEC + " 的整数", this);
+        if (waitSec < com.yaonan.util.global.Global.MIN_STEP_INTERVAL_SEC
+                || waitSec > com.yaonan.util.global.Global.MAX_STEP_INTERVAL_SEC) {
+            UI.alert("步骤间隔须为 " + com.yaonan.util.global.Global.MIN_STEP_INTERVAL_SEC
+                    + "~" + com.yaonan.util.global.Global.MAX_STEP_INTERVAL_SEC + " 的整数", this);
             return;
         }
 
         kv.putString(com.yaonan.util.global.Global.KEY_FEISHU_WEBHOOK, webhook);
-        kv.encode(com.yaonan.util.global.Global.KEY_CHECK_WAIT_SEC, waitSec);
+        kv.encode(com.yaonan.util.global.Global.KEY_STEP_INTERVAL_SEC, waitSec);
 
         LogHelper.i(TAG, "保存检测设置: webhook=" + (webhook.isEmpty() ? "未配置" : "已配置")
-                + ", 时长" + waitSec + "s");
+                + ", 步骤间隔" + waitSec + "s");
         UI.alert("检测设置已保存", this);
     }
 

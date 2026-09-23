@@ -15,18 +15,18 @@ public class Global {
     /** MMKV键：自定义风险关键词（多行文本，每行一个） */
     public static final String KEY_RISK_KEYWORDS = "risk_keywords";
 
-    /** MMKV键：每个链接的检查等待时长（秒，即点击链接后等待页面加载的时长） */
-    public static final String KEY_CHECK_WAIT_SEC = "check_wait_sec";
+    /** MMKV键：步骤间隔（秒，每个检测步骤之间的等待时长，越小检测越快） */
+    public static final String KEY_STEP_INTERVAL_SEC = "step_interval_sec";
 
     /** MMKV键：飞书自定义机器人 webhook 地址（发现风险链接时推送通知） */
     public static final String KEY_FEISHU_WEBHOOK = "feishu_webhook";
 
-    /** 检查等待时长默认值（秒） */
-    public static final int DEFAULT_CHECK_WAIT_SEC = 6;
+    /** 步骤间隔默认值（秒） */
+    public static final int DEFAULT_STEP_INTERVAL_SEC = 3;
 
-    /** 检查等待时长下限（秒） */
-    public static final int MIN_CHECK_WAIT_SEC = 3;
+    /** 步骤间隔下限（秒） */
+    public static final int MIN_STEP_INTERVAL_SEC = 1;
 
-    /** 检查等待时长上限（秒） */
-    public static final int MAX_CHECK_WAIT_SEC = 60;
+    /** 步骤间隔上限（秒） */
+    public static final int MAX_STEP_INTERVAL_SEC = 60;
 }

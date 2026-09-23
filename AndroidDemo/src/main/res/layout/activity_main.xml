@@ -309,7 +309,7 @@
                     android:id="@+id/tv_wait_label"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="检查时长(秒)"
+                    android:text="步骤间隔(秒)"
                     android:textColor="@color/text_secondary"
                     android:textSize="12sp" />
 

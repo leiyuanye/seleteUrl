@@ -417,8 +417,8 @@ public class SelectToSpeakService extends AccessibilityService {
             _Tap(linkRect.centerX(), linkRect.centerY(), 100L, null);
             LogHelper.e(TAG, "点击链接 " + linkRect);
 
-            // 3、等待页面加载（时长可在首页"检测设置"中配置，默认6秒）
-            long waitMs = getCheckWaitMs();
+            // 3、等待页面加载（时长为首页配置的"步骤间隔"）
+            long waitMs = getStepIntervalMs();
             LogHelper.e(TAG, "等待页面加载 " + (waitMs / 1000) + "s...");
             ThreadUtil.sleep(waitMs);
 
@@ -480,21 +480,22 @@ public class SelectToSpeakService extends AccessibilityService {
     }
 
     /**
-     * 读取每个链接的检查等待时长（毫秒）。
+     * 读取步骤间隔（毫秒）。
      *
-     * <p>从 MMKV "check_wait_sec" 读取（秒），越界自动回退默认值。</p>
+     * <p>从 MMKV "step_interval_sec" 读取（秒），越界自动回退默认值。
+     * 用于控制检测流程各步骤之间的等待时长。</p>
      *
-     * @return 等待时长毫秒
+     * @return 步骤间隔毫秒
      */
-    private long getCheckWaitMs() {
+    private long getStepIntervalMs() {
         int sec;
         try {
-            sec = UI.getMMKV().decodeInt(Global.KEY_CHECK_WAIT_SEC, Global.DEFAULT_CHECK_WAIT_SEC);
+            sec = UI.getMMKV().decodeInt(Global.KEY_STEP_INTERVAL_SEC, Global.DEFAULT_STEP_INTERVAL_SEC);
         } catch (Exception e) {
-            sec = Global.DEFAULT_CHECK_WAIT_SEC;
+            sec = Global.DEFAULT_STEP_INTERVAL_SEC;
         }
-        if (sec < Global.MIN_CHECK_WAIT_SEC || sec > Global.MAX_CHECK_WAIT_SEC) {
-            sec = Global.DEFAULT_CHECK_WAIT_SEC;
+        if (sec < Global.MIN_STEP_INTERVAL_SEC || sec > Global.MAX_STEP_INTERVAL_SEC) {
+            sec = Global.DEFAULT_STEP_INTERVAL_SEC;
         }
         return sec * 1000L;
     }

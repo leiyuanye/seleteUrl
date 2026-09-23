@@ -159,6 +159,26 @@ public class ScreenshotView extends FrameLayout {
     }
 
     /**
+     * 读取步骤间隔（毫秒）：每个检测步骤之间的等待时长，
+     * 由首页"检测设置-步骤间隔"配置（秒），范围1~60，默认3。
+     */
+    private long stepMs() {
+        int sec;
+        try {
+            sec = UI.getMMKV().decodeInt(
+                    com.yaonan.util.global.Global.KEY_STEP_INTERVAL_SEC,
+                    com.yaonan.util.global.Global.DEFAULT_STEP_INTERVAL_SEC);
+        } catch (Exception e) {
+            sec = com.yaonan.util.global.Global.DEFAULT_STEP_INTERVAL_SEC;
+        }
+        if (sec < com.yaonan.util.global.Global.MIN_STEP_INTERVAL_SEC
+                || sec > com.yaonan.util.global.Global.MAX_STEP_INTERVAL_SEC) {
+            sec = com.yaonan.util.global.Global.DEFAULT_STEP_INTERVAL_SEC;
+        }
+        return sec * 1000L;
+    }
+
+    /**
      * 链接检测主流程：逐个读取 TXT 中的链接并发送到当前微信聊天，
      * 点击打开链接扫描风险关键词，记录结果后返回聊天，继续处理下一条。
      *
@@ -201,8 +221,8 @@ public class ScreenshotView extends FrameLayout {
                 continue;
             }
 
-            // 2、等待消息出现在聊天列表（老仓库H5监控在发送后等3s，这里2s折中）
-            ThreadUtil.sleep(2000);
+            // 2、等待消息出现在聊天列表（步骤间隔）
+            ThreadUtil.sleep(stepMs());
 
             // 3、点击链接并扫描风险关键词（同步等待结果）
             String checkRes = cmdWait("#@#检查链接#" + link, 40);
@@ -216,13 +236,15 @@ public class ScreenshotView extends FrameLayout {
                         "⚠️ 发现风险链接 " + index + "/" + total
                                 + "\n关键词：" + keyword
                                 + "\n" + link, true));
-                // 推送通知到飞书群聊（配置了机器人地址时）
-                String webhook = UI.getMMKV().getString("feishu_webhook", "");
+                // 推送通知到飞书群聊（配置了机器人地址时），消息末尾@所有人
+                String webhook = UI.getMMKV().getString(
+                        com.yaonan.util.global.Global.KEY_FEISHU_WEBHOOK, "");
                 if (StringUtil.isNotEmpty(webhook)) {
                     String msg = "⚠️ 链接检测发现风险链接(" + index + "/" + total + ")"
                             + "\n关键词：" + keyword
                             + "\n链接：" + link
-                            + "\n时间：" + TimeUtil.nowTime();
+                            + "\n时间：" + TimeUtil.nowTime()
+                            + "\n<at user_id=\"all\">所有人</at>";
                     ThreadUtil.async(() -> {
                         boolean ok = FeishuHelper.sendText(webhook, msg);
                         LogHelper.i(TAG, "飞书风险推送: " + (ok ? "成功" : "失败"));
@@ -240,9 +262,8 @@ public class ScreenshotView extends FrameLayout {
                     || "normal".equals(checkRes)
                     || "error".equals(checkRes);
             if (pageOpened) {
-                ThreadUtil.sleep(500);
                 cmd("#@#action#back");
-                ThreadUtil.sleep(2000);
+                ThreadUtil.sleep(stepMs());
             } else {
                 LogHelper.e(TAG, "未发生页面跳转(" + checkRes + ")，无需返回");
             }
