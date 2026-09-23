@@ -38,36 +38,15 @@ import java.util.List;
 /**
  * 悬浮控制视图（悬浮窗内容）。
  *
- * 职责：作为无障碍服务承载的悬浮 UI，提供链接检测脚本的 开始/暂停/继续/停止 控制，支持拖动。
- * 脚本流程：逐个读取 TXT 中的链接，在当前微信聊天界面发送，点击打开该链接，
- * 扫描页面风险关键词（诱导分享/长按网址等），记录结果并返回聊天。
- *
- * 控制逻辑：
- * 点击「开始」：校验当前页面为"文件传输助手"聊天界面后开始检测（悬浮球显示"暂停"）；
- * 检测中点击：暂停（悬浮球显示"继续"），当前链接处理完后挂起；
- * 暂停中点击：再次校验页面后从上一次暂停的下一条链接继续；
- * 长按：停止脚本（重置进度）；
- * 一轮链接全部检测完后自动开启下一轮，循环往复。
+ * 职责：作为无障碍服务承载的悬浮 UI，提供链接检测的 开始/停止 控制，支持拖动。
+ * 点击「开始」：校验当前页面为"文件传输助手"聊天界面后，进入无限循环检测——
+ * 逐条发送 TXT 中的链接，打开并扫描风险关键词，一轮完成后自动从第一条开始下一轮，永不停止；
+ * 再次点击悬浮球：停止检测（悬浮球显示"开始"）。
  */
 public class ScreenshotView extends FrameLayout {
 
     /** 执行脚本的后台循环线程（null 表示当前未在运行） */
     public static Thread loopThread = null;
-
-    /** 暂停标志：true 表示脚本在当前链接处理完后挂起 */
-    private static volatile boolean paused = false;
-
-    /** 停止标志：true 表示用户长按请求停止脚本（重置进度） */
-    private static volatile boolean stopRequested = false;
-
-    /** 下一条待检测链接的下标（暂停/继续依据，避免重复检测） */
-    private static volatile int nextIndex = 0;
-
-    /** 当前检测轮次 */
-    private static volatile int round = 1;
-
-    /** 待检测链接列表 */
-    private static List<String> links = new ArrayList<>();
 
     /** 布局（拖动位置）变化监听器，用于将拖动结果回传给宿主 */
     @Nullable
@@ -90,9 +69,9 @@ public class ScreenshotView extends FrameLayout {
         super(context, attrs, defStyleAttr);
         init();
     }
-
     /**
-     * 初始化视图：加载布局、绑定悬浮球的拖动与点击/长按事件。
+     * 初始化视图：加载布局、绑定悬浮球的拖动与点击事件。
+     * 未运行时点击=开始；运行中点击=停止。
      */
     private void init() {
         LayoutInflater.from(getContext()).inflate(R.layout.layout_screenshot_view, this);
@@ -101,7 +80,7 @@ public class ScreenshotView extends FrameLayout {
             private float mDownX = 0F;
             /** 手指按下时的 Y 坐标，用于计算拖动距离 */
             private float mDownY = 0F;
-            /** 是否已判定为拖动（而非点击/长按） */
+            /** 是否已判定为拖动（而非点击） */
             private boolean mIsMoving = false;
             /** 判定为拖动所需的最小移动像素阈值 */
             private final int MIN_MOVING_PIXELS = getResources().getDimensionPixelSize(R.dimen.min_moving_pixels);
@@ -129,25 +108,13 @@ public class ScreenshotView extends FrameLayout {
                         v.setPressed(false);
                         if (!mIsMoving) {
                             TextView textView = (TextView) v;
-                            // 按住超过600ms判定为长按：停止脚本
-                            long held = event.getEventTime() - event.getDownTime();
-                            if (held >= 600 && loopThread != null) {
-                                LogHelper.e(TAG, "长按停止");
-                                UI.invokeLater(() -> UI.alert("已停止"));
-                                requestStop();
-                            } else if (loopThread == null) {
+                            if (loopThread == null) {
                                 startScript(textView);
-                            } else if (!paused) {
-                                // 检测中点击：暂停（当前链接处理完后挂起）
-                                paused = true;
-                                LogHelper.e(TAG, "已暂停");
-                                UI.invokeLater(() -> {
-                                    textView.setText("继续");
-                                    UI.alert("已暂停，点击悬浮球继续，长按悬浮球停止");
-                                });
                             } else {
-                                // 暂停中点击：校验页面后继续
-                                resumeScript(textView);
+                                // 运行中点击：停止脚本
+                                LogHelper.e(TAG, "手动停止");
+                                UI.invokeLater(() -> UI.alert("正在停止..."));
+                                loopThread.interrupt();
                             }
                         }
                         break;
@@ -162,17 +129,13 @@ public class ScreenshotView extends FrameLayout {
     }
 
     /**
-     * 启动检测脚本（首轮）。
+     * 启动检测脚本（无限循环，再次点击悬浮球停止）。
      */
     private void startScript(TextView textView) {
-        stopRequested = false;
-        paused = false;
-        nextIndex = 0;
-        round = 1;
         loopThread = ThreadUtil.async(() -> {
             try {
                 SelectToSpeakService.isRunning = true;
-                UI.invokeLater(() -> textView.setText("暂停"));
+                UI.invokeLater(() -> textView.setText("停止"));
 
                 // 页面校验：必须处于"文件传输助手"聊天界面
                 if (!checkFileHelperChat()) {
@@ -183,51 +146,21 @@ public class ScreenshotView extends FrameLayout {
                 UI.invokeLater(() -> UI.alert("已开始"));
                 runLinkCheck(textView);
             } catch (InterruptedException e) {
+                // 手动停止
                 UI.invokeLater(() -> UI.alert("已停止"));
             } catch (Exception e) {
-                UI.invokeLater(() -> UI.alert(e));
+                if (e.getMessage() != null && e.getMessage().contains("interrupt")) {
+                    // ThreadUtil.sleep 中断包装出的异常，视为手动停止
+                    UI.invokeLater(() -> UI.alert("已停止"));
+                } else {
+                    UI.invokeLater(() -> UI.alert(e));
+                }
             } finally {
                 SelectToSpeakService.isRunning = false;
                 loopThread = null;
-                nextIndex = 0;
-                round = 1;
                 UI.invokeLater(() -> textView.setText("开始"));
             }
         });
-    }
-
-    /**
-     * 继续检测（从暂停位置的下一条开始），继续前校验页面。
-     */
-    private void resumeScript(TextView textView) {
-        ThreadUtil.async(() -> {
-            try {
-                if (checkFileHelperChat()) {
-                    paused = false;
-                    LogHelper.e(TAG, "已继续，从第" + (nextIndex + 1) + "条开始");
-                    UI.invokeLater(() -> {
-                        textView.setText("暂停");
-                        UI.alert("已继续，从第" + (nextIndex + 1) + "条链接开始");
-                    });
-                } else {
-                    UI.invokeLater(() -> AlertHelper.showBanner(
-                            "请先进入「文件传输助手」聊天界面，再点击继续", true));
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        });
-    }
-
-    /**
-     * 请求停止脚本：中断线程并重置进度。
-     */
-    private void requestStop() {
-        stopRequested = true;
-        paused = false;
-        if (loopThread != null) {
-            loopThread.interrupt();
-        }
     }
 
     /**
@@ -262,40 +195,31 @@ public class ScreenshotView extends FrameLayout {
     }
 
     /**
-     * 链接检测主流程：循环检测所有链接，一轮完成后自动开启下一轮。
-     * 每条链接处理前检查暂停/停止标志，暂停恢复后从 nextIndex 继续，不重复检测。
+     * 链接检测主流程：无限循环，逐条发送 TXT 中的链接并检查风险关键词，
+     * 一轮完成后自动从第一条开始下一轮，永不停止（直到用户点击悬浮球停止）。
      *
      * @param textView 悬浮球文本控件，用于显示进度
      */
     private void runLinkCheck(TextView textView) throws InterruptedException {
         // 读取TXT链接列表
         String uriStr = UI.getMMKV().getString("links_uri", "");
-        links = StringUtil.isEmpty(uriStr) ? new ArrayList<>() : readLinks(Uri.parse(uriStr));
+        List<String> links = StringUtil.isEmpty(uriStr) ? new ArrayList<>() : readLinks(Uri.parse(uriStr));
         if (links.isEmpty()) {
             UI.invokeLater(() -> UI.alert("未读取到链接，请先在主页选择TXT文件（每行一条链接）"));
             return;
         }
 
-        appendResult("===== 检测任务开始 " + TimeUtil.nowTime() + "，共" + links.size() + "条 =====");
+        appendResult("===== 检测任务开始 " + TimeUtil.nowTime() + "，共" + links.size()
+                + "条，无限循环模式 =====");
 
-        // 外层循环：一轮完成后自动开启下一轮
-        while (!stopRequested) {
+        int round = 1;
+        // 死循环：一轮完成后自动开启下一轮
+        while (true) {
             int riskCount = 0;
-            appendResult("----- 第" + round + "轮开始（从第" + (nextIndex + 1) + "条）"
-                    + TimeUtil.nowTime() + " -----");
+            appendResult("----- 第" + round + "轮开始 " + TimeUtil.nowTime() + " -----");
 
-            // 内层循环：逐条检测，i 跟随 nextIndex 前进
-            for (int i = nextIndex; i < links.size(); i = nextIndex) {
-                // 暂停：挂起等待恢复或停止
-                while (paused && !stopRequested) {
-                    ThreadUtil.sleep(500);
-                }
-                if (stopRequested) {
-                    throw new InterruptedException();
-                }
-
+            for (int i = 0; i < links.size(); i++) {
                 String link = links.get(i);
-                nextIndex = i + 1; // 完成本条后从下一条继续（暂停恢复不重复检测）
                 int index = i + 1;
                 int total = links.size();
                 UI.invokeLater(() -> textView.setText(index + "/" + total));
@@ -373,9 +297,8 @@ public class ScreenshotView extends FrameLayout {
                     "第" + roundNo + "轮检测完成：共" + totalNo + "条，风险" + riskNo + "条\n即将开始下一轮...",
                     false));
             LogHelper.e(TAG, "===== 第" + roundNo + "轮结束，风险" + riskNo + "/" + totalNo
-                    + "，开启第" + (roundNo + 1) + "轮 =====");
+                    + "，自动开启第" + (roundNo + 1) + "轮 =====");
             round++;
-            nextIndex = 0;
             ThreadUtil.sleep(stepMs());
         }
     }
