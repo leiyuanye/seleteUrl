@@ -9,6 +9,7 @@ import android.graphics.Path;
 import android.graphics.Rect;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Display;
 import android.view.accessibility.AccessibilityEvent;
@@ -416,6 +417,7 @@ public class SelectToSpeakService extends AccessibilityService {
                 return;
             }
             // 1、OCR 在聊天列表中查找链接消息（消息气泡渲染有延迟，最多重试5次）
+            // 第3次重试起自动向上滑动聊天列表滚到底部（聊天停在历史位置时，新消息不在可见区域）
             Rect linkRect = null;
             Text lastVisionText = null;
             for (int retry = 0; retry < 5 && linkRect == null; retry++) {
@@ -424,6 +426,10 @@ public class SelectToSpeakService extends AccessibilityService {
                 }
                 linkRect = ocrFindTextRect(url, true);
                 if (linkRect == null) {
+                    if (retry >= 2) {
+                        swipeUpToBottom();
+                        ThreadUtil.sleep(800);
+                    }
                     lastVisionText = ocrCaptureText();
                 }
             }
@@ -537,6 +543,23 @@ public class SelectToSpeakService extends AccessibilityService {
             sec = Global.DEFAULT_STEP_INTERVAL_SEC;
         }
         return sec * 1000L;
+    }
+
+    /**
+     * 向上滑动聊天列表，使其滚动到底部（新发送的消息在列表最底部）。
+     */
+    private void swipeUpToBottom() {
+        DisplayMetrics dm = WindowHelper.getRealMetrics();
+        int x = dm.widthPixels / 2;
+        int y1 = (int) (dm.heightPixels * 0.75);
+        int y2 = (int) (dm.heightPixels * 0.25);
+        GestureDescription.Builder builder = new GestureDescription.Builder();
+        Path p = new Path();
+        p.moveTo(x, y1);
+        p.lineTo(x, y2);
+        builder.addStroke(new GestureDescription.StrokeDescription(p, 0L, 300L));
+        dispatchGesture(builder.build(), null, null);
+        LogHelper.e(TAG, "向上滑动聊天列表到底部");
     }
 
     /**
