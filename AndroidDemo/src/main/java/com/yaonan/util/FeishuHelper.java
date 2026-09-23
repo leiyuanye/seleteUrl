@@ -51,9 +51,12 @@ public class FeishuHelper {
                 // 未开启签名校验：最简格式
                 body = "{\"msg_type\":\"text\",\"content\":{\"text\":\"" + escape(message) + "\"}}";
             } else {
-                // 开启签名校验：sign = Base64(HmacSHA256(timestamp + "\n" + secret, key=secret))
+                // 开启签名校验。
+                // 注意飞书官方算法的特殊点：HMAC-SHA256 的 key 为 string_to_sign（timestamp+"\n"+secret），
+                // 而待签名的消息内容为空字符串，最后 Base64 编码
                 long timestamp = System.currentTimeMillis() / 1000;
-                String sign = Codec.hmacSha256(secret, timestamp + "\n" + secret);
+                String stringToSign = timestamp + "\n" + secret;
+                String sign = Codec.hmacSha256(stringToSign, "");
                 body = "{\"timestamp\":\"" + timestamp + "\",\"sign\":\"" + sign
                         + "\",\"msg_type\":\"text\",\"content\":{\"text\":\"" + escape(message) + "\"}}";
             }
