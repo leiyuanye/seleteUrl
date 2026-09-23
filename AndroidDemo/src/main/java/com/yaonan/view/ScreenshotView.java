@@ -18,6 +18,7 @@ import com.google.android.accessibility.selecttospeak.SelectToSpeakService;
 import com.tencent.mmkv.MMKV;
 import com.yaonan.App;
 import com.yaonan.R;
+import com.yaonan.util.AlertHelper;
 import com.yaonan.util.ClipboardHelper;
 import com.yaonan.util.codec.Codec;
 import com.yaonan.util.exception.ExceptionUtil;
@@ -208,8 +209,12 @@ public class ScreenshotView extends FrameLayout {
                 riskCount++;
                 String keyword = checkRes.substring("risk:".length());
                 appendResult("[风险-" + keyword + "] " + link);
-                UI.invokeLater(() -> UI.alert("⚠️ 发现风险链接 " + index + "/" + links.size()
-                        + "\n关键词：" + keyword + "\n" + link, true));
+                // 后台时Toast被系统限制，改用悬浮横幅醒目提醒
+                int total = links.size();
+                UI.invokeLater(() -> AlertHelper.showBanner(
+                        "⚠️ 发现风险链接 " + index + "/" + total
+                                + "\n关键词：" + keyword
+                                + "\n" + link, true));
             } else if ("normal".equals(checkRes)) {
                 appendResult("[正常] " + link);
             } else {
@@ -231,7 +236,7 @@ public class ScreenshotView extends FrameLayout {
         }
 
         String summary = "检测完成：共" + links.size() + "条，风险" + riskCount + "条\n结果已保存到 check_result.txt";
-        UI.invokeLater(() -> UI.alert(summary, true));
+        UI.invokeLater(() -> AlertHelper.showBanner(summary, true));
         appendResult("===== 检测结束 " + TimeUtil.nowTime() + "，风险" + riskCount + "/" + links.size() + " =====");
     }
 
