@@ -119,6 +119,14 @@ public class MainActivity extends AppCompatActivity {
             startActivityForResult(intent, REQ_PICK_TXT);
         });
 
+        // 检测设置：风险关键词 + 检查时长初始化
+        String defaultKeywords = String.join("\n", com.yaonan.util.global.Global.DEFAULT_RISK_KEYWORDS);
+        binding.etKeywords.setText(kv.getString(com.yaonan.util.global.Global.KEY_RISK_KEYWORDS, defaultKeywords));
+        binding.etCheckWait.setText(String.valueOf(
+                kv.decodeInt(com.yaonan.util.global.Global.KEY_CHECK_WAIT_SEC,
+                        com.yaonan.util.global.Global.DEFAULT_CHECK_WAIT_SEC)));
+        binding.btnSettingsSave.setOnClickListener(v -> saveSettings());
+
         // 运行日志：分享（通过微信/QQ等发送日志文件）
         binding.btnLogShare.setOnClickListener(v -> shareLogFile());
 
@@ -174,6 +182,38 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) {
             UI.alert("分享失败: " + e.getMessage(), this);
         }
+    }
+
+    /**
+     * 保存检测设置：风险关键词（每行一个）与检查时长（秒）。
+     */
+    private void saveSettings() {
+        MMKV kv = UI.getMMKV();
+
+        // 风险关键词：保存多行原文（空行过滤在服务端解析时处理）
+        String keywords = binding.etKeywords.getText() == null
+                ? "" : binding.etKeywords.getText().toString().trim();
+        kv.putString(com.yaonan.util.global.Global.KEY_RISK_KEYWORDS, keywords);
+
+        // 检查时长：校验范围 3~60 秒，非法回退默认
+        String waitStr = binding.etCheckWait.getText() == null
+                ? "" : binding.etCheckWait.getText().toString().trim();
+        int waitSec;
+        try {
+            waitSec = Integer.parseInt(waitStr);
+        } catch (NumberFormatException e) {
+            waitSec = -1;
+        }
+        if (waitSec < com.yaonan.util.global.Global.MIN_CHECK_WAIT_SEC
+                || waitSec > com.yaonan.util.global.Global.MAX_CHECK_WAIT_SEC) {
+            UI.alert("检查时长须为 " + com.yaonan.util.global.Global.MIN_CHECK_WAIT_SEC
+                    + "~" + com.yaonan.util.global.Global.MAX_CHECK_WAIT_SEC + " 的整数", this);
+            return;
+        }
+        kv.encode(com.yaonan.util.global.Global.KEY_CHECK_WAIT_SEC, waitSec);
+
+        LogHelper.i(TAG, "保存检测设置: 关键词" + keywords.length() + "字, 时长" + waitSec + "s");
+        UI.alert("检测设置已保存", this);
     }
 
     /**
@@ -236,6 +276,16 @@ public class MainActivity extends AppCompatActivity {
         binding.iconFileBg.setBackgroundResource(R.drawable.bg_ha_icon_timer);
         binding.iconFileImg.setImageTintList(ColorStateList.valueOf(Color.parseColor("#C4845A")));
         binding.tvFileTitle.setTextColor(colorCardTitle);
+
+        applyCardJournal(binding.cardSettings, R.drawable.bg_ha_card_3, 0.5f, density);
+        binding.tvSettingsTitle.setTextColor(colorCardTitle);
+        binding.etKeywords.setBackgroundResource(R.drawable.bg_ha_btn_disabled);
+        binding.etKeywords.setTextColor(colorDisabled);
+        binding.etKeywords.setHintTextColor(colorDisabled);
+        binding.etCheckWait.setBackgroundResource(R.drawable.bg_ha_btn_disabled);
+        binding.etCheckWait.setTextColor(colorDisabled);
+        binding.btnSettingsSave.setBackgroundResource(R.drawable.bg_ha_btn_primary);
+        binding.btnSettingsSave.setTextColor(Color.WHITE);
 
         applyCardJournal(binding.cardHelp, R.drawable.bg_ha_card_4, 0.7f, density);
         binding.tvHelpTitle.setTextColor(colorCardTitle);
@@ -306,6 +356,16 @@ public class MainActivity extends AppCompatActivity {
         binding.iconFileBg.setBackgroundResource(R.drawable.bg_icon_timer);
         binding.iconFileImg.setImageTintList(null);
         binding.tvFileTitle.setTextColor(colorTextPrimary);
+
+        applyCardDefault(binding.cardSettings, density);
+        binding.tvSettingsTitle.setTextColor(colorTextPrimary);
+        binding.etKeywords.setBackgroundResource(R.drawable.bg_btn_disabled);
+        binding.etKeywords.setTextColor(colorTextPrimary);
+        binding.etKeywords.setHintTextColor(colorTextSecondary);
+        binding.etCheckWait.setBackgroundResource(R.drawable.bg_btn_disabled);
+        binding.etCheckWait.setTextColor(colorTextPrimary);
+        binding.btnSettingsSave.setBackgroundResource(R.drawable.bg_btn_primary);
+        binding.btnSettingsSave.setTextColor(Color.WHITE);
 
         applyCardDefault(binding.cardHelp, density);
         binding.tvHelpTitle.setTextColor(colorTextPrimary);

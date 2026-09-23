@@ -24,12 +24,14 @@ import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions;
 import com.tencent.mmkv.MMKV;
 import com.yaonan.util.codec.Codec;
 import com.yaonan.util.exception.ExceptionUtil;
+import com.yaonan.util.global.Global;
 import com.yaonan.util.jna.UI;
 import com.yaonan.util.LogHelper;
 import com.yaonan.util.lang.StringUtil;
 import com.yaonan.util.lang.ThreadUtil;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -57,10 +59,7 @@ public class SelectToSpeakService extends AccessibilityService {
     /** 服务运行状态标志：true 表示当前无障碍服务已连接并处于运行状态，供其他线程判断服务是否可用 */
     public static volatile boolean isRunning = false;
 
-    /** 风险页关键词：网页中出现任一关键词即判定为"被微信拦截/风险提示" */
-    private static final String[] RISK_KEYWORDS = {
-            "诱导分享", "长按网址", "已停止访问", "谨慎访问", "安全性", "存在风险"
-    };
+    /** 风险页关键词：从 MMKV 读取用户自定义关键词，未配置时使用 Global.DEFAULT_RISK_KEYWORDS */
 
     /** 截屏回调执行器（takeScreenshot 要求提供 Executor，且回调不能在主线程死等） */
     private static final ExecutorService SCREENSHOT_EXECUTOR = Executors.newSingleThreadExecutor();
@@ -418,8 +417,10 @@ public class SelectToSpeakService extends AccessibilityService {
             _Tap(linkRect.centerX(), linkRect.centerY(), 100L, null);
             LogHelper.e(TAG, "点击链接 " + linkRect);
 
-            // 3、等待页面加载（参考老仓库H5监控的10s，这里6s折中）
-            ThreadUtil.sleep(6000);
+            // 3、等待页面加载（时长可在首页"检测设置"中配置，默认6秒）
+            long waitMs = getCheckWaitMs();
+            LogHelper.e(TAG, "等待页面加载 " + (waitMs / 1000) + "s...");
+            ThreadUtil.sleep(waitMs);
 
             // 4、校验是否真的离开了聊天界面：输入框仍在说明网页未打开成功
             if (findChatEditText() != null) {
@@ -428,10 +429,12 @@ public class SelectToSpeakService extends AccessibilityService {
                 return;
             }
 
-            // 5、OCR 扫描整页文本中的风险关键词
+            // 5、OCR 扫描整页文本中的风险关键词（用户可在首页自定义）
+            List<String> keywords = getRiskKeywords();
+            LogHelper.e(TAG, "扫描风险关键词: " + keywords);
             Text pageText = ocrCaptureText();
             if (pageText != null) {
-                for (String keyword : RISK_KEYWORDS) {
+                for (String keyword : keywords) {
                     if (containsNormalized(pageText, keyword)) {
                         LogHelper.e(TAG, "风险页面: 命中关键词[" + keyword + "]");
                         response(msgid, "risk:" + keyword);
@@ -449,6 +452,51 @@ public class SelectToSpeakService extends AccessibilityService {
             ExceptionUtil.getStackTrace(e);
             response(msgid, "error");
         }
+    }
+
+    /**
+     * 读取用户自定义的风险关键词列表。
+     *
+     * <p>从 MMKV "risk_keywords"（多行文本，每行一个）读取；
+     * 未配置或为空时使用 Global.DEFAULT_RISK_KEYWORDS。</p>
+     *
+     * @return 关键词列表（非空）
+     */
+    private List<String> getRiskKeywords() {
+        List<String> keywords = new ArrayList<>();
+        String saved = UI.getMMKV().getString(Global.KEY_RISK_KEYWORDS, "");
+        if (StringUtil.isNotEmpty(saved)) {
+            for (String line : saved.replace("\r", "").split("\n")) {
+                String trimmed = line.trim();
+                if (!trimmed.isEmpty()) {
+                    keywords.add(trimmed);
+                }
+            }
+        }
+        if (keywords.isEmpty()) {
+            keywords.addAll(Arrays.asList(Global.DEFAULT_RISK_KEYWORDS));
+        }
+        return keywords;
+    }
+
+    /**
+     * 读取每个链接的检查等待时长（毫秒）。
+     *
+     * <p>从 MMKV "check_wait_sec" 读取（秒），越界自动回退默认值。</p>
+     *
+     * @return 等待时长毫秒
+     */
+    private long getCheckWaitMs() {
+        int sec;
+        try {
+            sec = UI.getMMKV().decodeInt(Global.KEY_CHECK_WAIT_SEC, Global.DEFAULT_CHECK_WAIT_SEC);
+        } catch (Exception e) {
+            sec = Global.DEFAULT_CHECK_WAIT_SEC;
+        }
+        if (sec < Global.MIN_CHECK_WAIT_SEC || sec > Global.MAX_CHECK_WAIT_SEC) {
+            sec = Global.DEFAULT_CHECK_WAIT_SEC;
+        }
+        return sec * 1000L;
     }
 
     /**
