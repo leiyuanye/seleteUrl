@@ -200,8 +200,8 @@ public class ScreenshotView extends FrameLayout {
                 continue;
             }
 
-            // 2、等待消息出现在聊天列表
-            ThreadUtil.sleep(1500);
+            // 2、等待消息出现在聊天列表（老仓库H5监控在发送后等3s，这里2s折中）
+            ThreadUtil.sleep(2000);
 
             // 3、点击链接并扫描风险关键词（同步等待结果）
             String checkRes = cmdWait("#@#检查链接#" + link, 25);

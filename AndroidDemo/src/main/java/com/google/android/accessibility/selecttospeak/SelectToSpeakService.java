@@ -450,8 +450,15 @@ public class SelectToSpeakService extends AccessibilityService {
             _Tap(rect.centerX(), rect.centerY(), 100L, null);
             LogHelper.e(TAG, "点击链接 " + rect);
 
-            // 等待页面加载
-            ThreadUtil.sleep(4000);
+            // 等待页面加载（参考老仓库H5监控的10s，这里6s折中）
+            ThreadUtil.sleep(6000);
+
+            // 校验是否真的离开了聊天界面：输入框仍在说明网页未打开成功
+            if (findChatEditText() != null) {
+                LogHelper.e(TAG, "检查链接失败: 点击后仍在聊天界面(网页未打开)");
+                response(msgid, "nofind");
+                return;
+            }
 
             // 扫描当前页面所有节点文本中的风险关键词
             List<AccessibilityNodeInfo> allNodes = findNodeInfos();
