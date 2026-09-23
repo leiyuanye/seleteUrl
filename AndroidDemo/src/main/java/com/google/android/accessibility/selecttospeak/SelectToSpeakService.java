@@ -25,6 +25,7 @@ import com.tencent.mmkv.MMKV;
 import com.yaonan.util.codec.Codec;
 import com.yaonan.util.exception.ExceptionUtil;
 import com.yaonan.util.global.Global;
+import com.yaonan.util.WindowHelper;
 import com.yaonan.util.jna.UI;
 import com.yaonan.util.LogHelper;
 import com.yaonan.util.lang.StringUtil;
@@ -135,6 +136,31 @@ public class SelectToSpeakService extends AccessibilityService {
                         // 点击刚发送的链接消息，等待页面加载后扫描风险关键词，结果通过 msgid 同步回传
                         String url = cmd.substring("#@#检查链接#".length());
                         ThreadUtil.async(() -> checkLink(url, fMsgid));
+
+                    } else if ("#@#检查传输助手#".equals(cmd)) { // 页面校验
+                        // OCR识别屏幕顶部标题区域，判断当前是否处于"文件传输助手"聊天界面
+                        ThreadUtil.async(() -> {
+                            boolean ok = false;
+                            Text vt = ocrCaptureText();
+                            if (vt != null) {
+                                int titleBottom = (int) (WindowHelper.getRealMetrics().heightPixels * 0.10f);
+                                outer:
+                                for (Text.TextBlock block : vt.getTextBlocks()) {
+                                    for (Text.Line line : block.getLines()) {
+                                        Rect box = line.getBoundingBox();
+                                        if (box == null || box.top > titleBottom) {
+                                            continue;
+                                        }
+                                        if (normalizeText(line.getText()).contains("文件传输助手")) {
+                                            ok = true;
+                                            break outer;
+                                        }
+                                    }
+                                }
+                            }
+                            LogHelper.e(TAG, "页面校验(文件传输助手): " + ok);
+                            response(fMsgid, ok ? "yes" : "no");
+                        });
 
                     }
                 }

@@ -4,7 +4,6 @@ import static com.yaonan.util.global.Global.TAG;
 import android.content.Context;
 import android.net.Uri;
 import android.util.AttributeSet;
-import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
@@ -21,10 +20,10 @@ import com.yaonan.R;
 import com.yaonan.util.AlertHelper;
 import com.yaonan.util.ClipboardHelper;
 import com.yaonan.util.FeishuHelper;
+import com.yaonan.util.LogHelper;
 import com.yaonan.util.codec.Codec;
 import com.yaonan.util.exception.ExceptionUtil;
 import com.yaonan.util.jna.UI;
-import com.yaonan.util.LogHelper;
 import com.yaonan.util.lang.StringUtil;
 import com.yaonan.util.lang.ThreadUtil;
 import com.yaonan.util.lang.TimeUtil;
@@ -39,16 +38,36 @@ import java.util.List;
 /**
  * 悬浮控制视图（悬浮窗内容）。
  *
- * <p>职责：作为无障碍服务承载的悬浮 UI，提供"开始/停止"链接检测脚本开关，支持拖动。
- * 脚本流程：逐个读取 TXT 中的链接 → 在当前微信聊天界面发送 → 点击打开该链接 →
- * 扫描页面风险关键词（诱导分享/长按网址等）→ 记录结果并返回聊天 → 逐个处理直到结束。</p>
+ * 职责：作为无障碍服务承载的悬浮 UI，提供链接检测脚本的 开始/暂停/继续/停止 控制，支持拖动。
+ * 脚本流程：逐个读取 TXT 中的链接，在当前微信聊天界面发送，点击打开该链接，
+ * 扫描页面风险关键词（诱导分享/长按网址等），记录结果并返回聊天。
  *
- * <p>使用方式：在主页选择 TXT 文件 → 用户手动打开微信并进入聊天界面 → 点击悬浮球"开始"。</p>
+ * 控制逻辑：
+ * 点击「开始」：校验当前页面为"文件传输助手"聊天界面后开始检测（悬浮球显示"暂停"）；
+ * 检测中点击：暂停（悬浮球显示"继续"），当前链接处理完后挂起；
+ * 暂停中点击：再次校验页面后从上一次暂停的下一条链接继续；
+ * 长按：停止脚本（重置进度）；
+ * 一轮链接全部检测完后自动开启下一轮，循环往复。
  */
 public class ScreenshotView extends FrameLayout {
 
     /** 执行脚本的后台循环线程（null 表示当前未在运行） */
     public static Thread loopThread = null;
+
+    /** 暂停标志：true 表示脚本在当前链接处理完后挂起 */
+    private static volatile boolean paused = false;
+
+    /** 停止标志：true 表示用户长按请求停止脚本（重置进度） */
+    private static volatile boolean stopRequested = false;
+
+    /** 下一条待检测链接的下标（暂停/继续依据，避免重复检测） */
+    private static volatile int nextIndex = 0;
+
+    /** 当前检测轮次 */
+    private static volatile int round = 1;
+
+    /** 待检测链接列表 */
+    private static List<String> links = new ArrayList<>();
 
     /** 布局（拖动位置）变化监听器，用于将拖动结果回传给宿主 */
     @Nullable
@@ -73,7 +92,7 @@ public class ScreenshotView extends FrameLayout {
     }
 
     /**
-     * 初始化视图：加载布局、绑定悬浮球的拖动与点击事件。
+     * 初始化视图：加载布局、绑定悬浮球的拖动与点击/长按事件。
      */
     private void init() {
         LayoutInflater.from(getContext()).inflate(R.layout.layout_screenshot_view, this);
@@ -82,7 +101,7 @@ public class ScreenshotView extends FrameLayout {
             private float mDownX = 0F;
             /** 手指按下时的 Y 坐标，用于计算拖动距离 */
             private float mDownY = 0F;
-            /** 是否已判定为拖动（而非点击） */
+            /** 是否已判定为拖动（而非点击/长按） */
             private boolean mIsMoving = false;
             /** 判定为拖动所需的最小移动像素阈值 */
             private final int MIN_MOVING_PIXELS = getResources().getDimensionPixelSize(R.dimen.min_moving_pixels);
@@ -108,46 +127,30 @@ public class ScreenshotView extends FrameLayout {
                         break;
                     case MotionEvent.ACTION_UP:
                         v.setPressed(false);
-                        // 未发生拖动时视为点击：未运行则启动脚本，运行中则停止脚本
                         if (!mIsMoving) {
                             TextView textView = (TextView) v;
-                            if (loopThread == null) {
-                                loopThread = ThreadUtil.async(() -> {
-                                    try {
-                                        SelectToSpeakService.isRunning = true;
-                                        UI.invokeLater(() -> {
-                                            UI.alert("已开始");
-                                        });
-                                        UI.invokeLater(() -> {
-                                            textView.setText("停止");
-                                        });
-                                        runLinkCheck(textView);
-                                        UI.invokeLater(() -> {
-                                            UI.alert("已全部完成");
-                                        });
-                                    } catch (InterruptedException e) {
-                                        // 手动停止
-                                        UI.invokeLater(() -> {
-                                            UI.alert("已停止");
-                                        });
-                                    } catch (Exception e) {
-                                        UI.invokeLater(() -> {
-                                            UI.alert(e);
-                                        });
-                                    } finally {
-                                        SelectToSpeakService.isRunning = false;
-                                        loopThread = null;
-                                        UI.invokeLater(() -> {
-                                            textView.setText("开始");
-                                        });
-                                    }
+                            // 按住超过600ms判定为长按：停止脚本
+                            long held = event.getEventTime() - event.getDownTime();
+                            if (held >= 600 && loopThread != null) {
+                                LogHelper.e(TAG, "长按停止");
+                                UI.invokeLater(() -> UI.alert("已停止"));
+                                requestStop();
+                            } else if (loopThread == null) {
+                                startScript(textView);
+                            } else if (!paused) {
+                                // 检测中点击：暂停（当前链接处理完后挂起）
+                                paused = true;
+                                LogHelper.e(TAG, "已暂停");
+                                UI.invokeLater(() -> {
+                                    textView.setText("继续");
+                                    UI.alert("已暂停，点击悬浮球继续，长按悬浮球停止");
                                 });
                             } else {
-                                // 暂停脚本
-                                LogHelper.e(TAG, "手动停止");
-                                loopThread.interrupt();
+                                // 暂停中点击：校验页面后继续
+                                resumeScript(textView);
                             }
                         }
+                        break;
                 }
                 return true;
             }
@@ -156,6 +159,86 @@ public class ScreenshotView extends FrameLayout {
                 return Math.abs(event.getX() - mDownX) > MIN_MOVING_PIXELS || Math.abs(event.getY() - mDownY) > MIN_MOVING_PIXELS;
             }
         });
+    }
+
+    /**
+     * 启动检测脚本（首轮）。
+     */
+    private void startScript(TextView textView) {
+        stopRequested = false;
+        paused = false;
+        nextIndex = 0;
+        round = 1;
+        loopThread = ThreadUtil.async(() -> {
+            try {
+                SelectToSpeakService.isRunning = true;
+                UI.invokeLater(() -> textView.setText("暂停"));
+
+                // 页面校验：必须处于"文件传输助手"聊天界面
+                if (!checkFileHelperChat()) {
+                    UI.invokeLater(() -> AlertHelper.showBanner(
+                            "请先进入「文件传输助手」聊天界面，再点击开始", true));
+                    return;
+                }
+                UI.invokeLater(() -> UI.alert("已开始"));
+                runLinkCheck(textView);
+            } catch (InterruptedException e) {
+                UI.invokeLater(() -> UI.alert("已停止"));
+            } catch (Exception e) {
+                UI.invokeLater(() -> UI.alert(e));
+            } finally {
+                SelectToSpeakService.isRunning = false;
+                loopThread = null;
+                nextIndex = 0;
+                round = 1;
+                UI.invokeLater(() -> textView.setText("开始"));
+            }
+        });
+    }
+
+    /**
+     * 继续检测（从暂停位置的下一条开始），继续前校验页面。
+     */
+    private void resumeScript(TextView textView) {
+        ThreadUtil.async(() -> {
+            try {
+                if (checkFileHelperChat()) {
+                    paused = false;
+                    LogHelper.e(TAG, "已继续，从第" + (nextIndex + 1) + "条开始");
+                    UI.invokeLater(() -> {
+                        textView.setText("暂停");
+                        UI.alert("已继续，从第" + (nextIndex + 1) + "条链接开始");
+                    });
+                } else {
+                    UI.invokeLater(() -> AlertHelper.showBanner(
+                            "请先进入「文件传输助手」聊天界面，再点击继续", true));
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+    }
+
+    /**
+     * 请求停止脚本：中断线程并重置进度。
+     */
+    private void requestStop() {
+        stopRequested = true;
+        paused = false;
+        if (loopThread != null) {
+            loopThread.interrupt();
+        }
+    }
+
+    /**
+     * 校验当前页面是否为"文件传输助手"聊天界面（无障碍服务 OCR 识别标题区域）。
+     *
+     * @return true 表示处于文件传输助手聊天界面
+     * @throws InterruptedException 等待过程中被中断
+     */
+    private boolean checkFileHelperChat() throws InterruptedException {
+        String res = cmdWait("#@#检查传输助手#", 15);
+        return "yes".equals(res);
     }
 
     /**
@@ -179,99 +262,122 @@ public class ScreenshotView extends FrameLayout {
     }
 
     /**
-     * 链接检测主流程：逐个读取 TXT 中的链接并发送到当前微信聊天，
-     * 点击打开链接扫描风险关键词，记录结果后返回聊天，继续处理下一条。
+     * 链接检测主流程：循环检测所有链接，一轮完成后自动开启下一轮。
+     * 每条链接处理前检查暂停/停止标志，暂停恢复后从 nextIndex 继续，不重复检测。
      *
      * @param textView 悬浮球文本控件，用于显示进度
      */
     private void runLinkCheck(TextView textView) throws InterruptedException {
         // 读取TXT链接列表
         String uriStr = UI.getMMKV().getString("links_uri", "");
-        List<String> links = StringUtil.isEmpty(uriStr) ? new ArrayList<>() : readLinks(Uri.parse(uriStr));
+        links = StringUtil.isEmpty(uriStr) ? new ArrayList<>() : readLinks(Uri.parse(uriStr));
         if (links.isEmpty()) {
             UI.invokeLater(() -> UI.alert("未读取到链接，请先在主页选择TXT文件（每行一条链接）"));
             return;
         }
 
-        // 写入本次检测结果表头（文件为追加模式，历史结果按表头分块）
-        appendResult("===== 检测开始 " + TimeUtil.nowTime() + "，共" + links.size() + "条 =====");
+        appendResult("===== 检测任务开始 " + TimeUtil.nowTime() + "，共" + links.size() + "条 =====");
 
-        int riskCount = 0;
-        for (int i = 0; i < links.size(); i++) {
-            if (ThreadUtil.isInterrupted()) {
-                throw new InterruptedException();
-            }
-            String link = links.get(i);
-            int index = i + 1;
-            UI.invokeLater(() -> textView.setText(index + "/" + links.size()));
-            LogHelper.e(TAG, "===== [" + index + "/" + links.size() + "] " + link);
+        // 外层循环：一轮完成后自动开启下一轮
+        while (!stopRequested) {
+            int riskCount = 0;
+            appendResult("----- 第" + round + "轮开始（从第" + (nextIndex + 1) + "条）"
+                    + TimeUtil.nowTime() + " -----");
 
-            // 1、写入剪贴板（无障碍服务在微信内通过粘贴输入，粘贴会触发"发送"按钮显示）
-            boolean clipOk = ClipboardHelper.setString(link);
-            if (!clipOk) {
-                LogHelper.e(TAG, "剪贴板写入失败，服务端将退回SET_TEXT方式");
-            }
-
-            // 2、发送链接（同步等待结果，三级输入+重试耗时较长，放宽到30s）
-            String sendRes = cmdWait("#@#发送链接#" + link, 30);
-            if (!"success".equals(sendRes)) {
-                LogHelper.e(TAG, "发送失败: " + sendRes);
-                appendResult("[发送失败][" + sendRes + "] " + link);
-                // 仍处于聊天界面，无需返回（按返回会退出会话导致后续链接失败）
-                continue;
-            }
-
-            // 2、等待消息出现在聊天列表（步骤间隔）
-            ThreadUtil.sleep(stepMs());
-
-            // 3、点击链接并扫描风险关键词（同步等待结果）
-            String checkRes = cmdWait("#@#检查链接#" + link, 40);
-            if (checkRes.startsWith("risk")) {
-                riskCount++;
-                String keyword = checkRes.substring("risk:".length());
-                appendResult("[风险-" + keyword + "] " + link);
-                // 后台时Toast被系统限制，改用悬浮横幅醒目提醒
-                int total = links.size();
-                UI.invokeLater(() -> AlertHelper.showBanner(
-                        "⚠️ 发现风险链接 " + index + "/" + total
-                                + "\n关键词：" + keyword
-                                + "\n" + link, true));
-                // 推送通知到飞书群聊（配置了机器人地址时），消息末尾@所有人
-                String webhook = UI.getMMKV().getString(
-                        com.yaonan.util.global.Global.KEY_FEISHU_WEBHOOK, "");
-                if (StringUtil.isNotEmpty(webhook)) {
-                    String msg = "⚠️ 链接检测发现风险链接(" + index + "/" + total + ")"
-                            + "\n关键词：" + keyword
-                            + "\n链接：" + link
-                            + "\n时间：" + TimeUtil.nowTime()
-                            + "\n<at user_id=\"all\">所有人</at>";
-                    ThreadUtil.async(() -> {
-                        boolean ok = FeishuHelper.sendText(webhook, msg);
-                        LogHelper.i(TAG, "飞书风险推送: " + (ok ? "成功" : "失败"));
-                    });
+            // 内层循环：逐条检测，i 跟随 nextIndex 前进
+            for (int i = nextIndex; i < links.size(); i = nextIndex) {
+                // 暂停：挂起等待恢复或停止
+                while (paused && !stopRequested) {
+                    ThreadUtil.sleep(500);
                 }
-            } else if ("normal".equals(checkRes)) {
-                appendResult("[正常] " + link);
-            } else {
-                appendResult("[异常-" + checkRes + "] " + link);
-            }
+                if (stopRequested) {
+                    throw new InterruptedException();
+                }
 
-            // 4、仅当打开过网页时才需要从网页返回聊天界面
-            //    nofind/notopen 表示未发生页面跳转，此时按返回会退出聊天会话，导致后续链接失败
-            boolean pageOpened = checkRes.startsWith("risk")
-                    || "normal".equals(checkRes)
-                    || "error".equals(checkRes);
-            if (pageOpened) {
-                cmd("#@#action#back");
+                String link = links.get(i);
+                nextIndex = i + 1; // 完成本条后从下一条继续（暂停恢复不重复检测）
+                int index = i + 1;
+                int total = links.size();
+                UI.invokeLater(() -> textView.setText(index + "/" + total));
+                LogHelper.e(TAG, "===== [" + index + "/" + total + "] " + link);
+
+                // 1、写入剪贴板（无障碍服务在微信内通过粘贴输入，粘贴会触发"发送"按钮显示）
+                boolean clipOk = ClipboardHelper.setString(link);
+                if (!clipOk) {
+                    LogHelper.e(TAG, "剪贴板写入失败，服务端将退回SET_TEXT方式");
+                }
+
+                // 2、发送链接（同步等待结果，三级输入+重试耗时较长，放宽到30s）
+                String sendRes = cmdWait("#@#发送链接#" + link, 30);
+                if (!"success".equals(sendRes)) {
+                    LogHelper.e(TAG, "发送失败: " + sendRes);
+                    appendResult("[发送失败][" + sendRes + "] " + link);
+                    // 仍处于聊天界面，无需返回（按返回会退出会话导致后续链接失败）
+                    continue;
+                }
+
+                // 3、等待消息出现在聊天列表（步骤间隔）
                 ThreadUtil.sleep(stepMs());
-            } else {
-                LogHelper.e(TAG, "未发生页面跳转(" + checkRes + ")，无需返回");
-            }
-        }
 
-        String summary = "检测完成：共" + links.size() + "条，风险" + riskCount + "条\n结果已保存到 check_result.txt";
-        UI.invokeLater(() -> AlertHelper.showBanner(summary, true));
-        appendResult("===== 检测结束 " + TimeUtil.nowTime() + "，风险" + riskCount + "/" + links.size() + " =====");
+                // 4、点击链接并扫描风险关键词（同步等待结果）
+                String checkRes = cmdWait("#@#检查链接#" + link, 40);
+                if (checkRes.startsWith("risk")) {
+                    riskCount++;
+                    String keyword = checkRes.substring("risk:".length());
+                    appendResult("[风险-" + keyword + "] " + link);
+                    // 后台时Toast被系统限制，改用悬浮横幅醒目提醒
+                    UI.invokeLater(() -> AlertHelper.showBanner(
+                            "⚠️ 发现风险链接 " + index + "/" + total
+                                    + "\n关键词：" + keyword
+                                    + "\n" + link, true));
+                    // 推送通知到飞书群聊（配置了机器人地址时），消息末尾@所有人
+                    String webhook = UI.getMMKV().getString(
+                            com.yaonan.util.global.Global.KEY_FEISHU_WEBHOOK, "");
+                    if (StringUtil.isNotEmpty(webhook)) {
+                        String msg = "⚠️ 链接检测发现风险链接(" + index + "/" + total + ")"
+                                + "\n关键词：" + keyword
+                                + "\n链接：" + link
+                                + "\n时间：" + TimeUtil.nowTime()
+                                + "\n<at user_id=\"all\">所有人</at>";
+                        ThreadUtil.async(() -> {
+                            boolean ok = FeishuHelper.sendText(webhook, msg);
+                            LogHelper.i(TAG, "飞书风险推送: " + (ok ? "成功" : "失败"));
+                        });
+                    }
+                } else if ("normal".equals(checkRes)) {
+                    appendResult("[正常] " + link);
+                } else {
+                    appendResult("[异常-" + checkRes + "] " + link);
+                }
+
+                // 5、仅当打开过网页时才需要从网页返回聊天界面
+                //    nofind/notopen 表示未发生页面跳转，此时按返回会退出聊天会话，导致后续链接失败
+                boolean pageOpened = checkRes.startsWith("risk")
+                        || "normal".equals(checkRes)
+                        || "error".equals(checkRes);
+                if (pageOpened) {
+                    cmd("#@#action#back");
+                    ThreadUtil.sleep(stepMs());
+                } else {
+                    LogHelper.e(TAG, "未发生页面跳转(" + checkRes + ")，无需返回");
+                }
+            }
+
+            // 一轮结束：记录并自动开启下一轮
+            appendResult("----- 第" + round + "轮结束 " + TimeUtil.nowTime()
+                    + "，风险" + riskCount + "/" + links.size() + " -----");
+            int roundNo = round;
+            int totalNo = links.size();
+            int riskNo = riskCount;
+            UI.invokeLater(() -> AlertHelper.showBanner(
+                    "第" + roundNo + "轮检测完成：共" + totalNo + "条，风险" + riskNo + "条\n即将开始下一轮...",
+                    false));
+            LogHelper.e(TAG, "===== 第" + roundNo + "轮结束，风险" + riskNo + "/" + totalNo
+                    + "，开启第" + (roundNo + 1) + "轮 =====");
+            round++;
+            nextIndex = 0;
+            ThreadUtil.sleep(stepMs());
+        }
     }
 
     /**
