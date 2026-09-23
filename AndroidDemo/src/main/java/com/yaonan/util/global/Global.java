@@ -18,6 +18,9 @@ public class Global {
     /** MMKV键：每个链接的检查等待时长（秒，即点击链接后等待页面加载的时长） */
     public static final String KEY_CHECK_WAIT_SEC = "check_wait_sec";
 
+    /** MMKV键：飞书自定义机器人 webhook 地址（发现风险链接时推送通知） */
+    public static final String KEY_FEISHU_WEBHOOK = "feishu_webhook";
+
     /** 检查等待时长默认值（秒） */
     public static final int DEFAULT_CHECK_WAIT_SEC = 6;
 

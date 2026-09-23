@@ -28,6 +28,7 @@ import com.yaonan.App;
 import com.yaonan.R;
 import com.yaonan.databinding.ActivityMainBinding;
 import com.yaonan.util.LogHelper;
+import com.yaonan.util.lang.ThreadUtil;
 import com.yaonan.util.WindowHelper;
 import com.yaonan.util.jna.UI;
 import com.yaonan.util.lang.StringUtil;
@@ -124,7 +125,9 @@ public class MainActivity extends AppCompatActivity {
             startActivityForResult(intent, REQ_PICK_TXT);
         });
 
-        // 检测设置：风险关键词摘要（点击编辑）+ 检查时长
+        // 检测设置：飞书机器人地址 + 风险关键词摘要（点击编辑）+ 检查时长
+        binding.etFeishuWebhook.setText(kv.getString(com.yaonan.util.global.Global.KEY_FEISHU_WEBHOOK, ""));
+        binding.btnFeishuTest.setOnClickListener(v -> testFeishuWebhook());
         refreshKeywordSummary();
         binding.tvKeywordsSummary.setOnClickListener(v -> showKeywordsDialog());
         binding.etCheckWait.setText(String.valueOf(
@@ -257,10 +260,18 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 保存检测时长（秒），范围 3~60。
+     * 保存检测设置：飞书机器人地址与检查时长（秒，范围 3~60）。
      */
     private void saveSettings() {
         MMKV kv = UI.getMMKV();
+
+        // 飞书机器人地址：空=不推送；非空必须 https:// 开头
+        String webhook = binding.etFeishuWebhook.getText() == null
+                ? "" : binding.etFeishuWebhook.getText().toString().trim();
+        if (!webhook.isEmpty() && !webhook.startsWith("https://")) {
+            UI.alert("机器人地址须为 https:// 开头", this);
+            return;
+        }
 
         // 检查时长：校验范围 3~60 秒，非法回退默认
         String waitStr = binding.etCheckWait.getText() == null
@@ -277,10 +288,31 @@ public class MainActivity extends AppCompatActivity {
                     + "~" + com.yaonan.util.global.Global.MAX_CHECK_WAIT_SEC + " 的整数", this);
             return;
         }
+
+        kv.putString(com.yaonan.util.global.Global.KEY_FEISHU_WEBHOOK, webhook);
         kv.encode(com.yaonan.util.global.Global.KEY_CHECK_WAIT_SEC, waitSec);
 
-        LogHelper.i(TAG, "保存检查时长: " + waitSec + "s");
-        UI.alert("检查时长已保存：" + waitSec + "秒", this);
+        LogHelper.i(TAG, "保存检测设置: webhook=" + (webhook.isEmpty() ? "未配置" : "已配置")
+                + ", 时长" + waitSec + "s");
+        UI.alert("检测设置已保存", this);
+    }
+
+    /**
+     * 发送飞书测试消息验证机器人地址。
+     */
+    private void testFeishuWebhook() {
+        String webhook = binding.etFeishuWebhook.getText() == null
+                ? "" : binding.etFeishuWebhook.getText().toString().trim();
+        if (webhook.isEmpty()) {
+            UI.alert("请先填写机器人地址", this);
+            return;
+        }
+        UI.alert("正在发送测试消息...", this);
+        ThreadUtil.async(() -> {
+            boolean ok = com.yaonan.util.FeishuHelper.sendText(webhook, "链接检测测试消息");
+            UI.invokeLater(() -> UI.alert(ok ? "测试消息已发送，请查看群聊"
+                    : "测试消息发送失败，请检查地址", this));
+        });
     }
 
     /**
@@ -346,6 +378,12 @@ public class MainActivity extends AppCompatActivity {
 
         applyCardJournal(binding.cardSettings, R.drawable.bg_ha_card_3, 0.5f, density);
         binding.tvSettingsTitle.setTextColor(colorCardTitle);
+        binding.tvFeishuLabel.setTextColor(colorCardTitle);
+        binding.etFeishuWebhook.setBackgroundResource(R.drawable.bg_ha_btn_disabled);
+        binding.etFeishuWebhook.setTextColor(colorDisabled);
+        binding.etFeishuWebhook.setHintTextColor(colorDisabled);
+        binding.btnFeishuTest.setBackgroundResource(R.drawable.bg_ha_btn_primary);
+        binding.btnFeishuTest.setTextColor(Color.WHITE);
         binding.tvKeywordsSummary.setBackgroundResource(R.drawable.bg_ha_btn_disabled);
         binding.tvKeywordsSummary.setTextColor(colorDisabled);
         binding.etCheckWait.setBackgroundResource(R.drawable.bg_ha_btn_disabled);
@@ -425,6 +463,12 @@ public class MainActivity extends AppCompatActivity {
 
         applyCardDefault(binding.cardSettings, density);
         binding.tvSettingsTitle.setTextColor(colorTextPrimary);
+        binding.tvFeishuLabel.setTextColor(colorTextPrimary);
+        binding.etFeishuWebhook.setBackgroundResource(R.drawable.bg_btn_disabled);
+        binding.etFeishuWebhook.setTextColor(colorTextPrimary);
+        binding.etFeishuWebhook.setHintTextColor(colorTextSecondary);
+        binding.btnFeishuTest.setBackgroundResource(R.drawable.bg_btn_primary);
+        binding.btnFeishuTest.setTextColor(Color.WHITE);
         binding.tvKeywordsSummary.setBackgroundResource(R.drawable.bg_btn_disabled);
         binding.tvKeywordsSummary.setTextColor(colorTextPrimary);
         binding.etCheckWait.setBackgroundResource(R.drawable.bg_btn_disabled);

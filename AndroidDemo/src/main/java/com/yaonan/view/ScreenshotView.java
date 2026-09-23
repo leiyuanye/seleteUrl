@@ -20,6 +20,7 @@ import com.yaonan.App;
 import com.yaonan.R;
 import com.yaonan.util.AlertHelper;
 import com.yaonan.util.ClipboardHelper;
+import com.yaonan.util.FeishuHelper;
 import com.yaonan.util.codec.Codec;
 import com.yaonan.util.exception.ExceptionUtil;
 import com.yaonan.util.jna.UI;
@@ -215,6 +216,18 @@ public class ScreenshotView extends FrameLayout {
                         "⚠️ 发现风险链接 " + index + "/" + total
                                 + "\n关键词：" + keyword
                                 + "\n" + link, true));
+                // 推送通知到飞书群聊（配置了机器人地址时）
+                String webhook = UI.getMMKV().getString("feishu_webhook", "");
+                if (StringUtil.isNotEmpty(webhook)) {
+                    String msg = "⚠️ 链接检测发现风险链接(" + index + "/" + total + ")"
+                            + "\n关键词：" + keyword
+                            + "\n链接：" + link
+                            + "\n时间：" + TimeUtil.nowTime();
+                    ThreadUtil.async(() -> {
+                        boolean ok = FeishuHelper.sendText(webhook, msg);
+                        LogHelper.i(TAG, "飞书风险推送: " + (ok ? "成功" : "失败"));
+                    });
+                }
             } else if ("normal".equals(checkRes)) {
                 appendResult("[正常] " + link);
             } else {

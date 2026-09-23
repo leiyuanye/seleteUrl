@@ -235,6 +235,44 @@
                 android:textStyle="bold" />
 
             <TextView
+                android:id="@+id/tv_feishu_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="飞书机器人地址（发现风险链接推送到群聊）"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <EditText
+                    android:id="@+id/et_feishu_webhook"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_btn_disabled"
+                    android:hint="https://open.feishu.cn/open-apis/bot/v2/hook/..."
+                    android:inputType="textUri"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:singleLine="true"
+                    android:textColor="@color/text_primary"
+                    android:textColorHint="@color/text_secondary"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/btn_feishu_test"
+                    style="@style/BtnPrimary"
+                    android:layout_marginStart="8dp"
+                    android:text="测试" />
+            </LinearLayout>
+
+            <TextView
                 android:id="@+id/tv_keywords_label"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
