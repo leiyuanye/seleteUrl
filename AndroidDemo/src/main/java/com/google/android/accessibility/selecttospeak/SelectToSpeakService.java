@@ -457,10 +457,9 @@ public class SelectToSpeakService extends AccessibilityService {
             _Tap(linkRect.centerX(), linkRect.centerY(), 100L, null);
             LogHelper.e(TAG, "点击链接 " + linkRect);
 
-            // 3、等待页面加载（时长为首页配置的"步骤间隔"）
-            long waitMs = getStepIntervalMs();
-            LogHelper.e(TAG, "等待页面加载 " + (waitMs / 1000) + "s...");
-            ThreadUtil.sleep(waitMs);
+            // 3、等待页面加载：固定7秒（保证网页渲染完整、关键词不漏报，不受步骤间隔影响）
+            LogHelper.e(TAG, "等待页面加载 7s...");
+            ThreadUtil.sleep(7000);
 
             // 4、校验是否真的离开了聊天界面：输入框仍在说明网页未打开成功
             if (findChatEditText() != null) {
