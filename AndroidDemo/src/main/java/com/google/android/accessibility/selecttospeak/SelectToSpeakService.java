@@ -378,14 +378,38 @@ public class SelectToSpeakService extends AccessibilityService {
         try {
             // 1、OCR 在聊天列表中查找链接消息（消息气泡渲染有延迟，最多重试5次）
             Rect linkRect = null;
+            Text lastVisionText = null;
             for (int retry = 0; retry < 5 && linkRect == null; retry++) {
                 if (retry > 0) {
                     ThreadUtil.sleep(1500);
                 }
                 linkRect = ocrFindTextRect(url, true);
+                if (linkRect == null) {
+                    lastVisionText = ocrCaptureText();
+                }
             }
             if (linkRect == null) {
                 LogHelper.e(TAG, "检查链接失败: 聊天中未找到 " + url);
+                // 诊断：输出OCR识别到的文本行，便于核对微信聊天界面的实际显示内容
+                if (lastVisionText != null) {
+                    StringBuilder diag = new StringBuilder();
+                    int n = 0;
+                    for (Text.TextBlock block : lastVisionText.getTextBlocks()) {
+                        for (Text.Line line : block.getLines()) {
+                            String t = line.getText().trim();
+                            if (!t.isEmpty()) {
+                                diag.append("[").append(t).append("]");
+                                if (++n >= 15) {
+                                    break;
+                                }
+                            }
+                        }
+                        if (n >= 15) {
+                            break;
+                        }
+                    }
+                    LogHelper.e(TAG, "OCR识别文本行: " + diag);
+                }
                 response(msgid, "nofind");
                 return;
             }
@@ -494,13 +518,14 @@ public class SelectToSpeakService extends AccessibilityService {
      */
     private Rect findTextRect(Text visionText, String target, boolean last) {
         Rect found = null;
-        String normTarget = normalizeText(target);
+        // 忽略大小写：OCR 对混合大小写短链的大小写识别不可靠
+        String normTarget = normalizeText(target).toLowerCase();
         if (normTarget.isEmpty()) {
             return null;
         }
         for (Text.TextBlock block : visionText.getTextBlocks()) {
             for (Text.Line line : block.getLines()) {
-                String normLine = normalizeText(line.getText());
+                String normLine = normalizeText(line.getText()).toLowerCase();
                 Rect box = line.getBoundingBox();
                 if (box == null || box.isEmpty()) {
                     continue;
@@ -544,6 +569,11 @@ public class SelectToSpeakService extends AccessibilityService {
     /**
      * OCR 查找目标文字在屏幕上的位置。
      *
+     * <p>匹配降级策略：全路径(忽略大小写) → 仅域名部分。
+     * 随机短链的路径部分（混合大小写+数字）OCR 极易误读单个字符，
+     * 域名部分字符稳定可靠；且每次只检查刚发送的一条链接，
+     * 屏幕最下方匹配域名的消息即为刚发送的链接。</p>
+     *
      * @param target 目标文字（自动去除协议头以兼容聊天中链接的显示形式）
      * @param last   true取最下方匹配（最新消息）
      * @return 屏幕边界（未找到返回 null）
@@ -551,6 +581,11 @@ public class SelectToSpeakService extends AccessibilityService {
     private Rect ocrFindTextRect(String target, boolean last) {
         // 链接消息在聊天中可能不带协议头显示，匹配时去除 https:// 前缀
         String matchTarget = target.replaceFirst("^https?://", "");
+        String host = matchTarget;
+        int slash = matchTarget.indexOf('/');
+        if (slash > 0) {
+            host = matchTarget.substring(0, slash);
+        }
         Text visionText = ocrCaptureText();
         if (visionText == null) {
             return null;
@@ -558,6 +593,15 @@ public class SelectToSpeakService extends AccessibilityService {
         Rect rect = findTextRect(visionText, matchTarget, last);
         if (rect != null) {
             LogHelper.e(TAG, "OCR命中[" + matchTarget + "] " + rect);
+            return rect;
+        }
+        // 降级：仅按域名匹配
+        if (!host.equals(matchTarget)) {
+            LogHelper.e(TAG, "全路径未命中，降级按域名匹配: " + host);
+            rect = findTextRect(visionText, host, last);
+            if (rect != null) {
+                LogHelper.e(TAG, "OCR命中[域名:" + host + "] " + rect);
+            }
         }
         return rect;
     }
