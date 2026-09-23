@@ -281,6 +281,8 @@ public class ScreenshotView extends FrameLayout {
                 // 推送通知到飞书群聊（配置了机器人地址时），消息末尾@所有人
                 String webhook = UI.getMMKV().getString(
                         com.yaonan.util.global.Global.KEY_FEISHU_WEBHOOK, "");
+                String feishuSecret = UI.getMMKV().getString(
+                        com.yaonan.util.global.Global.KEY_FEISHU_SECRET, "");
                 if (StringUtil.isNotEmpty(webhook)) {
                     String msg = "⚠️ 链接检测发现风险链接(" + index + "/" + total + ")"
                             + "\n关键词：" + keyword
@@ -288,7 +290,7 @@ public class ScreenshotView extends FrameLayout {
                             + "\n时间：" + TimeUtil.nowTime()
                             + "\n<at user_id=\"all\">所有人</at>";
                     ThreadUtil.async(() -> {
-                        boolean ok = FeishuHelper.sendText(webhook, msg);
+                        boolean ok = FeishuHelper.sendText(webhook, msg, feishuSecret);
                         LogHelper.i(TAG, "飞书风险推送: " + (ok ? "成功" : "失败"));
                     });
                 }

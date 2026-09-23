@@ -2,6 +2,7 @@ package com.yaonan.util;
 
 import static com.yaonan.util.global.Global.TAG;
 
+import com.yaonan.util.codec.Codec;
 import com.yaonan.util.lang.StringUtil;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -28,9 +29,10 @@ public class FeishuHelper {
      *
      * @param webhook 机器人 webhook 地址
      * @param message 文本内容
+     * @param secret  签名校验密钥（机器人未开启签名校验时传空串）
      * @return 是否推送成功
      */
-    public static boolean sendText(String webhook, String message) {
+    public static boolean sendText(String webhook, String message, String secret) {
         if (StringUtil.isEmpty(webhook) || !webhook.startsWith("http")) {
             LogHelper.e(TAG, "飞书推送失败: webhook地址无效");
             return false;
@@ -44,7 +46,17 @@ public class FeishuHelper {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
 
-            String body = "{\"msg_type\":\"text\",\"content\":{\"text\":\"" + escape(message) + "\"}}";
+            String body;
+            if (StringUtil.isEmpty(secret)) {
+                // 未开启签名校验：最简格式
+                body = "{\"msg_type\":\"text\",\"content\":{\"text\":\"" + escape(message) + "\"}}";
+            } else {
+                // 开启签名校验：sign = Base64(HmacSHA256(timestamp + "\n" + secret, key=secret))
+                long timestamp = System.currentTimeMillis() / 1000;
+                String sign = Codec.hmacSha256(secret, timestamp + "\n" + secret);
+                body = "{\"timestamp\":\"" + timestamp + "\",\"sign\":\"" + sign
+                        + "\",\"msg_type\":\"text\",\"content\":{\"text\":\"" + escape(message) + "\"}}";
+            }
             try (OutputStream os = conn.getOutputStream()) {
                 os.write(body.getBytes(StandardCharsets.UTF_8));
             }

@@ -125,8 +125,10 @@ public class MainActivity extends AppCompatActivity {
             startActivityForResult(intent, REQ_PICK_TXT);
         });
 
-        // 检测设置：飞书机器人地址 + 风险关键词摘要（点击编辑）+ 检查时长
+        // 检测设置：飞书机器人地址 + 密钥 + 风险关键词摘要（点击编辑）+ 检查时长
         binding.etFeishuWebhook.setText(kv.getString(com.yaonan.util.global.Global.KEY_FEISHU_WEBHOOK, ""));
+        binding.etFeishuSecret.setText(kv.getString(com.yaonan.util.global.Global.KEY_FEISHU_SECRET,
+                com.yaonan.util.global.Global.DEFAULT_FEISHU_SECRET));
         binding.btnFeishuTest.setOnClickListener(v -> testFeishuWebhook());
         refreshKeywordSummary();
         binding.tvKeywordsSummary.setOnClickListener(v -> showKeywordsDialog());
@@ -272,6 +274,9 @@ public class MainActivity extends AppCompatActivity {
             UI.alert("机器人地址须为 https:// 开头", this);
             return;
         }
+        // 签名校验密钥：机器人未开启签名校验时留空
+        String secret = binding.etFeishuSecret.getText() == null
+                ? "" : binding.etFeishuSecret.getText().toString().trim();
 
         // 步骤间隔：校验范围 1~60 秒，非法回退默认
         String waitStr = binding.etCheckWait.getText() == null
@@ -290,6 +295,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         kv.putString(com.yaonan.util.global.Global.KEY_FEISHU_WEBHOOK, webhook);
+        kv.putString(com.yaonan.util.global.Global.KEY_FEISHU_SECRET, secret);
         kv.encode(com.yaonan.util.global.Global.KEY_STEP_INTERVAL_SEC, waitSec);
 
         LogHelper.i(TAG, "保存检测设置: webhook=" + (webhook.isEmpty() ? "未配置" : "已配置")
@@ -298,7 +304,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 发送飞书测试消息验证机器人地址。
+     * 发送飞书测试消息验证机器人地址与签名密钥。
      */
     private void testFeishuWebhook() {
         String webhook = binding.etFeishuWebhook.getText() == null
@@ -307,11 +313,13 @@ public class MainActivity extends AppCompatActivity {
             UI.alert("请先填写机器人地址", this);
             return;
         }
+        String secret = binding.etFeishuSecret.getText() == null
+                ? "" : binding.etFeishuSecret.getText().toString().trim();
         UI.alert("正在发送测试消息...", this);
         ThreadUtil.async(() -> {
-            boolean ok = com.yaonan.util.FeishuHelper.sendText(webhook, "链接检测测试消息");
+            boolean ok = com.yaonan.util.FeishuHelper.sendText(webhook, "链接检测测试消息", secret);
             UI.invokeLater(() -> UI.alert(ok ? "测试消息已发送，请查看群聊"
-                    : "测试消息发送失败，请检查地址", this));
+                    : "测试消息发送失败，请检查地址与密钥", this));
         });
     }
 
@@ -382,6 +390,9 @@ public class MainActivity extends AppCompatActivity {
         binding.etFeishuWebhook.setBackgroundResource(R.drawable.bg_ha_btn_disabled);
         binding.etFeishuWebhook.setTextColor(colorDisabled);
         binding.etFeishuWebhook.setHintTextColor(colorDisabled);
+        binding.etFeishuSecret.setBackgroundResource(R.drawable.bg_ha_btn_disabled);
+        binding.etFeishuSecret.setTextColor(colorDisabled);
+        binding.etFeishuSecret.setHintTextColor(colorDisabled);
         binding.btnFeishuTest.setBackgroundResource(R.drawable.bg_ha_btn_primary);
         binding.btnFeishuTest.setTextColor(Color.WHITE);
         binding.tvKeywordsSummary.setBackgroundResource(R.drawable.bg_ha_btn_disabled);
@@ -467,6 +478,9 @@ public class MainActivity extends AppCompatActivity {
         binding.etFeishuWebhook.setBackgroundResource(R.drawable.bg_btn_disabled);
         binding.etFeishuWebhook.setTextColor(colorTextPrimary);
         binding.etFeishuWebhook.setHintTextColor(colorTextSecondary);
+        binding.etFeishuSecret.setBackgroundResource(R.drawable.bg_btn_disabled);
+        binding.etFeishuSecret.setTextColor(colorTextPrimary);
+        binding.etFeishuSecret.setHintTextColor(colorTextSecondary);
         binding.btnFeishuTest.setBackgroundResource(R.drawable.bg_btn_primary);
         binding.btnFeishuTest.setTextColor(Color.WHITE);
         binding.tvKeywordsSummary.setBackgroundResource(R.drawable.bg_btn_disabled);

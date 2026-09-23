@@ -21,6 +21,12 @@ public class Global {
     /** MMKV键：飞书自定义机器人 webhook 地址（发现风险链接时推送通知） */
     public static final String KEY_FEISHU_WEBHOOK = "feishu_webhook";
 
+    /** MMKV键：飞书机器人签名校验密钥（机器人未开启签名校验时留空） */
+    public static final String KEY_FEISHU_SECRET = "feishu_secret";
+
+    /** 默认签名校验密钥（可在首页修改） */
+    public static final String DEFAULT_FEISHU_SECRET = "1vfjnCjphsXod7QT1IiwYc";
+
     /** 步骤间隔默认值（秒） */
     public static final int DEFAULT_STEP_INTERVAL_SEC = 3;
 

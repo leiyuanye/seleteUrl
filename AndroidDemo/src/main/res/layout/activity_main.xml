@@ -273,6 +273,30 @@
             </LinearLayout>
 
             <TextView
+                android:id="@+id/tv_secret_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="机器人密钥（未开启签名校验则留空）"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/et_feishu_secret"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_btn_disabled"
+                android:hint="签名校验密钥"
+                android:inputType="text"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:singleLine="true"
+                android:textColor="@color/text_primary"
+                android:textColorHint="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <TextView
                 android:id="@+id/tv_keywords_label"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
