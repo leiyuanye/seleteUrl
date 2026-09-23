@@ -121,6 +121,8 @@ public class ScreenshotView extends FrameLayout {
                                         UI.invokeLater(() -> {
                                             textView.setText("停止");
                                         });
+                                        // 页面校验：必须处于"文件传输助手"聊天界面，否则提醒并挂起等待
+                                        waitUntilFileHelperChat();
                                         runLinkCheck(textView);
                                         UI.invokeLater(() -> {
                                             UI.alert("已全部完成");
@@ -156,6 +158,30 @@ public class ScreenshotView extends FrameLayout {
                 return Math.abs(event.getX() - mDownX) > MIN_MOVING_PIXELS || Math.abs(event.getY() - mDownY) > MIN_MOVING_PIXELS;
             }
         });
+    }
+
+    /**
+     * 挂起等待用户回到"文件传输助手"聊天界面：横幅提醒一次，轮询直到校验通过后自动继续检测。
+     * 启动时与检测过程中（nochat）都会调用。
+     *
+     * @throws InterruptedException 用户点击悬浮球停止时中断
+     */
+    private void waitUntilFileHelperChat() throws InterruptedException {
+        boolean reminded = false;
+        while (true) {
+            String res = cmdWait("#@#检查传输助手#", 15);
+            if ("yes".equals(res)) {
+                LogHelper.e(TAG, "已回到文件传输助手聊天界面，继续检测");
+                return;
+            }
+            if (!reminded) {
+                reminded = true;
+                LogHelper.e(TAG, "不在文件传输助手聊天界面，等待用户返回...");
+                UI.invokeLater(() -> AlertHelper.showBanner(
+                        "请回到「文件传输助手」聊天界面\n回到后检测将自动继续", true));
+            }
+            ThreadUtil.sleep(2000);
+        }
     }
 
     /**
@@ -218,6 +244,12 @@ public class ScreenshotView extends FrameLayout {
 
             // 2、发送链接（同步等待结果，三级输入+重试耗时较长，放宽到30s）
             String sendRes = cmdWait("#@#发送链接#" + link, 30);
+            if ("nochat".equals(sendRes)) {
+                // 不在聊天界面：提醒用户回到文件传输助手，回到后自动重试本条
+                waitUntilFileHelperChat();
+                i--; // 重试当前链接
+                continue;
+            }
             if (!"success".equals(sendRes)) {
                 LogHelper.e(TAG, "发送失败: " + sendRes);
                 appendResult("[发送失败][" + sendRes + "] " + link);
@@ -230,6 +262,12 @@ public class ScreenshotView extends FrameLayout {
 
             // 3、点击链接并扫描风险关键词（同步等待结果）
             String checkRes = cmdWait("#@#检查链接#" + link, 40);
+            if ("nochat".equals(checkRes)) {
+                // 不在聊天界面时结果不可信：提醒用户回到后自动重查本条
+                waitUntilFileHelperChat();
+                i--; // 重试当前链接
+                continue;
+            }
             if (checkRes.startsWith("risk")) {
                 riskCount++;
                 String keyword = checkRes.substring("risk:".length());

@@ -138,24 +138,32 @@ public class SelectToSpeakService extends AccessibilityService {
                         ThreadUtil.async(() -> checkLink(url, fMsgid));
 
                     } else if ("#@#检查传输助手#".equals(cmd)) { // 页面校验
-                        // OCR识别屏幕顶部标题区域，判断当前是否处于"文件传输助手"聊天界面
+                        // 双重校验：1处于某个聊天界面（存在输入框节点）+ 2 OCR标题区域包含"文件传输助手"
+                        // （仅OCR标题会在微信主列表恰好第一条是文件传输助手时误判通过）
                         ThreadUtil.async(() -> {
-                            boolean ok = false;
-                            Text vt = ocrCaptureText();
-                            if (vt != null) {
-                                int titleBottom = (int) (WindowHelper.getRealMetrics().heightPixels * 0.10f);
-                                outer:
-                                for (Text.TextBlock block : vt.getTextBlocks()) {
-                                    for (Text.Line line : block.getLines()) {
-                                        Rect box = line.getBoundingBox();
-                                        if (box == null || box.top > titleBottom) {
-                                            continue;
-                                        }
-                                        if (normalizeText(line.getText()).contains("文件传输助手")) {
-                                            ok = true;
-                                            break outer;
+                            boolean ok = findChatEditText() != null;
+                            if (ok) {
+                                Text vt = ocrCaptureText();
+                                if (vt != null) {
+                                    int titleBottom = (int) (WindowHelper.getRealMetrics().heightPixels * 0.10f);
+                                    boolean titleMatch = false;
+                                    outer:
+                                    for (Text.TextBlock block : vt.getTextBlocks()) {
+                                        for (Text.Line line : block.getLines()) {
+                                            Rect box = line.getBoundingBox();
+                                            if (box == null || box.top > titleBottom) {
+                                                continue;
+                                            }
+                                            if (normalizeText(line.getText()).contains("文件传输助手")) {
+                                                titleMatch = true;
+                                                break outer;
+                                            }
                                         }
                                     }
+                                    ok = titleMatch;
+                                } else {
+                                    // OCR失败时退化为仅校验处于聊天界面
+                                    LogHelper.e(TAG, "页面校验: OCR失败，仅校验聊天界面");
                                 }
                             }
                             LogHelper.e(TAG, "页面校验(文件传输助手): " + ok);
@@ -181,11 +189,11 @@ public class SelectToSpeakService extends AccessibilityService {
      */
     private void sendLink(String url, String msgid) {
         try {
-            // 1、定位输入框
+            // 1、定位输入框（不在聊天界面时回复nochat，主循环会提醒用户并等待）
             AccessibilityNodeInfo editNode = findChatEditText();
             if (editNode == null) {
-                LogHelper.e(TAG, "发送链接失败: 未找到聊天输入框");
-                response(msgid, "error");
+                LogHelper.e(TAG, "发送链接失败: 不在聊天界面(未找到输入框)");
+                response(msgid, "nochat");
                 return;
             }
 
@@ -401,6 +409,12 @@ public class SelectToSpeakService extends AccessibilityService {
      */
     private void checkLink(String url, String msgid) {
         try {
+            // 不在聊天界面（无输入框）时结果不可信，回复nochat让主循环提醒用户
+            if (findChatEditText() == null) {
+                LogHelper.e(TAG, "检查链接失败: 不在聊天界面");
+                response(msgid, "nochat");
+                return;
+            }
             // 1、OCR 在聊天列表中查找链接消息（消息气泡渲染有延迟，最多重试5次）
             Rect linkRect = null;
             Text lastVisionText = null;
