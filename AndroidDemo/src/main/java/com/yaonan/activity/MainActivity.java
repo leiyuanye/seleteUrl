@@ -11,10 +11,14 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.view.Gravity;
 import android.view.View;
 import android.view.accessibility.AccessibilityManager;
+import android.widget.ArrayAdapter;
+import android.widget.EditText;
 
 import androidx.annotation.Nullable;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
@@ -30,6 +34,7 @@ import com.yaonan.util.lang.StringUtil;
 import com.yaonan.view.ScreenshotView;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -119,9 +124,9 @@ public class MainActivity extends AppCompatActivity {
             startActivityForResult(intent, REQ_PICK_TXT);
         });
 
-        // 检测设置：风险关键词 + 检查时长初始化
-        String defaultKeywords = String.join("\n", com.yaonan.util.global.Global.DEFAULT_RISK_KEYWORDS);
-        binding.etKeywords.setText(kv.getString(com.yaonan.util.global.Global.KEY_RISK_KEYWORDS, defaultKeywords));
+        // 检测设置：风险关键词摘要（点击编辑）+ 检查时长
+        refreshKeywordSummary();
+        binding.tvKeywordsSummary.setOnClickListener(v -> showKeywordsDialog());
         binding.etCheckWait.setText(String.valueOf(
                 kv.decodeInt(com.yaonan.util.global.Global.KEY_CHECK_WAIT_SEC,
                         com.yaonan.util.global.Global.DEFAULT_CHECK_WAIT_SEC)));
@@ -185,15 +190,77 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 保存检测设置：风险关键词（每行一个）与检查时长（秒）。
+     * 刷新关键词摘要展示（固定高度、超出省略）。
+     */
+    @SuppressLint("SetTextI18n")
+    private void refreshKeywordSummary() {
+        List<String> items = getKeywordItems();
+        if (items.isEmpty()) {
+            binding.tvKeywordsSummary.setText("未设置，使用默认关键词");
+            binding.tvKeywordsLabel.setText("风险关键词（点击编辑，当前0个）");
+            return;
+        }
+        binding.tvKeywordsSummary.setText(String.join("、", items));
+        binding.tvKeywordsLabel.setText("风险关键词（共" + items.size() + "个，点击编辑）");
+    }
+
+    /**
+     * 读取当前生效的关键词列表（未设置时返回默认关键词）。
+     */
+    private List<String> getKeywordItems() {
+        String defaultKeywords = String.join("\n", com.yaonan.util.global.Global.DEFAULT_RISK_KEYWORDS);
+        String saved = UI.getMMKV().getString(
+                com.yaonan.util.global.Global.KEY_RISK_KEYWORDS, defaultKeywords);
+        List<String> items = new ArrayList<>();
+        if (StringUtil.isNotEmpty(saved)) {
+            for (String line : saved.replace("\r", "").split("\n")) {
+                String trimmed = line.trim();
+                if (!trimmed.isEmpty()) {
+                    items.add(trimmed);
+                }
+            }
+        }
+        return items;
+    }
+
+    /**
+     * 弹窗编辑风险关键词：多行文本框，每行一个；支持保存与恢复默认。
+     */
+    private void showKeywordsDialog() {
+        MMKV kv = UI.getMMKV();
+        String defaultKeywords = String.join("\n", com.yaonan.util.global.Global.DEFAULT_RISK_KEYWORDS);
+        String current = kv.getString(com.yaonan.util.global.Global.KEY_RISK_KEYWORDS, defaultKeywords);
+
+        final EditText input = new EditText(this);
+        input.setText(current);
+        input.setMinLines(6);
+        input.setGravity(Gravity.TOP);
+        input.setSelection(current == null ? 0 : current.length());
+
+        new AlertDialog.Builder(this)
+                .setTitle("风险关键词（每行一个）")
+                .setView(input)
+                .setNegativeButton("取消", null)
+                .setNeutralButton("恢复默认", (dialog, which) -> {
+                    kv.putString(com.yaonan.util.global.Global.KEY_RISK_KEYWORDS, defaultKeywords);
+                    refreshKeywordSummary();
+                    UI.alert("已恢复默认关键词", this);
+                })
+                .setPositiveButton("保存", (dialog, which) -> {
+                    String text = input.getText() == null ? "" : input.getText().toString().trim();
+                    kv.putString(com.yaonan.util.global.Global.KEY_RISK_KEYWORDS, text);
+                    refreshKeywordSummary();
+                    LogHelper.i(TAG, "保存风险关键词: " + text.length() + "字");
+                    UI.alert("关键词已保存", this);
+                })
+                .show();
+    }
+
+    /**
+     * 保存检测时长（秒），范围 3~60。
      */
     private void saveSettings() {
         MMKV kv = UI.getMMKV();
-
-        // 风险关键词：保存多行原文（空行过滤在服务端解析时处理）
-        String keywords = binding.etKeywords.getText() == null
-                ? "" : binding.etKeywords.getText().toString().trim();
-        kv.putString(com.yaonan.util.global.Global.KEY_RISK_KEYWORDS, keywords);
 
         // 检查时长：校验范围 3~60 秒，非法回退默认
         String waitStr = binding.etCheckWait.getText() == null
@@ -212,8 +279,8 @@ public class MainActivity extends AppCompatActivity {
         }
         kv.encode(com.yaonan.util.global.Global.KEY_CHECK_WAIT_SEC, waitSec);
 
-        LogHelper.i(TAG, "保存检测设置: 关键词" + keywords.length() + "字, 时长" + waitSec + "s");
-        UI.alert("检测设置已保存", this);
+        LogHelper.i(TAG, "保存检查时长: " + waitSec + "s");
+        UI.alert("检查时长已保存：" + waitSec + "秒", this);
     }
 
     /**
@@ -279,9 +346,8 @@ public class MainActivity extends AppCompatActivity {
 
         applyCardJournal(binding.cardSettings, R.drawable.bg_ha_card_3, 0.5f, density);
         binding.tvSettingsTitle.setTextColor(colorCardTitle);
-        binding.etKeywords.setBackgroundResource(R.drawable.bg_ha_btn_disabled);
-        binding.etKeywords.setTextColor(colorDisabled);
-        binding.etKeywords.setHintTextColor(colorDisabled);
+        binding.tvKeywordsSummary.setBackgroundResource(R.drawable.bg_ha_btn_disabled);
+        binding.tvKeywordsSummary.setTextColor(colorDisabled);
         binding.etCheckWait.setBackgroundResource(R.drawable.bg_ha_btn_disabled);
         binding.etCheckWait.setTextColor(colorDisabled);
         binding.btnSettingsSave.setBackgroundResource(R.drawable.bg_ha_btn_primary);
@@ -359,9 +425,8 @@ public class MainActivity extends AppCompatActivity {
 
         applyCardDefault(binding.cardSettings, density);
         binding.tvSettingsTitle.setTextColor(colorTextPrimary);
-        binding.etKeywords.setBackgroundResource(R.drawable.bg_btn_disabled);
-        binding.etKeywords.setTextColor(colorTextPrimary);
-        binding.etKeywords.setHintTextColor(colorTextSecondary);
+        binding.tvKeywordsSummary.setBackgroundResource(R.drawable.bg_btn_disabled);
+        binding.tvKeywordsSummary.setTextColor(colorTextPrimary);
         binding.etCheckWait.setBackgroundResource(R.drawable.bg_btn_disabled);
         binding.etCheckWait.setTextColor(colorTextPrimary);
         binding.btnSettingsSave.setBackgroundResource(R.drawable.bg_btn_primary);

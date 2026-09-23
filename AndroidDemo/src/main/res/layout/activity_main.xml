@@ -239,23 +239,25 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="风险关键词（每行一个，网页出现即提醒）"
+                android:text="风险关键词（点击编辑）"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
-            <EditText
-                android:id="@+id/et_keywords"
+            <!-- 固定高度摘要展示：超出省略，点击弹出编辑窗口 -->
+            <TextView
+                android:id="@+id/tv_keywords_summary"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
+                android:layout_height="44dp"
                 android:layout_marginTop="6dp"
                 android:background="@drawable/bg_btn_disabled"
-                android:gravity="top"
-                android:hint="诱导分享&#10;长按网址"
-                android:inputType="textMultiLine"
-                android:minLines="3"
-                android:padding="10dp"
+                android:ellipsize="end"
+                android:gravity="center_vertical"
+                android:maxLines="2"
+                android:paddingStart="10dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="4dp"
                 android:textColor="@color/text_primary"
-                android:textColorHint="@color/text_secondary"
                 android:textSize="12sp" />
 
             <LinearLayout
