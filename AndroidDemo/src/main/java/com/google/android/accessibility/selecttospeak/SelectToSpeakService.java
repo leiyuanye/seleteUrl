@@ -440,7 +440,10 @@ public class SelectToSpeakService extends AccessibilityService {
                 return;
             }
             // 1、OCR 在聊天列表中查找链接消息（消息气泡渲染有延迟，最多重试5次）
-            // 第3次重试起自动向上滑动聊天列表滚到底部（聊天停在历史位置时，新消息不在可见区域）
+            // 先把聊天滚动到底部：无障碍粘贴发送不会触发微信自动滚动，
+            // 聊天停留在历史位置时新消息在可视区之外，且会误点击旧消息（旧链接打不开或非本条）
+            swipeUpToBottom();
+            ThreadUtil.sleep(800);
             Rect linkRect = null;
             Text lastVisionText = null;
             for (int retry = 0; retry < 5 && linkRect == null; retry++) {
