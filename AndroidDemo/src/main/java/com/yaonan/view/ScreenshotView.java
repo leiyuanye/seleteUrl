@@ -285,33 +285,30 @@ public class ScreenshotView extends FrameLayout {
             final String keywordFinal = keyword;
             if (isRisk) {
                 // 后台时Toast被系统限制，改用悬浮横幅醒目提醒
-                int total = links.size();
+                int totalCount = links.size();
                 UI.invokeLater(() -> AlertHelper.showBanner(
-                        "⚠️ 发现风险链接 " + index + "/" + total
+                        "⚠️ 发现风险链接 " + index + "/" + totalCount
                                 + "\n关键词：" + keywordFinal
                                 + "\n" + link, true));
-            }
 
-            // 推送通知到飞书群聊（配置了机器人地址时）：每条链接都通知，风险链接@所有人
-            String webhook = UI.getMMKV().getString(
-                    com.yaonan.util.global.Global.KEY_FEISHU_WEBHOOK, "");
-            String feishuSecret = UI.getMMKV().getString(
-                    com.yaonan.util.global.Global.KEY_FEISHU_SECRET, "");
-            if (StringUtil.isNotEmpty(webhook)) {
-                int roundNo = round;
-                int total = links.size();
-                String resultText = isRisk ? "⚠️ 风险-" + keyword
-                        : ("normal".equals(checkRes) ? "✅ 正常" : "❌ 异常-" + checkRes);
-                String atAll = isRisk ? "\n<at user_id=\"all\">所有人</at>" : "";
-                String msg = "【链接检测】第" + roundNo + "轮 " + index + "/" + total
-                        + "\n结果：" + resultText
-                        + "\n链接：" + link
-                        + "\n时间：" + TimeUtil.nowTime()
-                        + atAll;
-                ThreadUtil.async(() -> {
-                    boolean ok = FeishuHelper.sendText(webhook, msg, feishuSecret);
-                    LogHelper.i(TAG, "飞书推送(" + resultText + "): " + (ok ? "成功" : "失败"));
-                });
+                // 发现风险链接：推送到飞书群聊并@所有人
+                String webhook = UI.getMMKV().getString(
+                        com.yaonan.util.global.Global.KEY_FEISHU_WEBHOOK, "");
+                String feishuSecret = UI.getMMKV().getString(
+                        com.yaonan.util.global.Global.KEY_FEISHU_SECRET, "");
+                if (StringUtil.isNotEmpty(webhook)) {
+                    int roundNo = round;
+                    int total = links.size();
+                    String msg = "⚠️ 链接检测发现风险链接(第" + roundNo + "轮 " + index + "/" + total + ")"
+                            + "\n关键词：" + keywordFinal
+                            + "\n链接：" + link
+                            + "\n时间：" + TimeUtil.nowTime()
+                            + "\n<at user_id=\"all\">所有人</at>";
+                    ThreadUtil.async(() -> {
+                        boolean ok = FeishuHelper.sendText(webhook, msg, feishuSecret);
+                        LogHelper.i(TAG, "飞书风险推送: " + (ok ? "成功" : "失败"));
+                    });
+                }
             }
 
             // 4、仅当打开过网页时才需要从网页返回聊天界面
@@ -327,8 +324,6 @@ public class ScreenshotView extends FrameLayout {
             }
         }
 
-        String summary = "检测完成：共" + links.size() + "条，风险" + riskCount + "条\n结果已保存到 check_result.txt";
-        UI.invokeLater(() -> AlertHelper.showBanner(summary, true));
         appendResult("===== 第" + round + "轮检测结束 " + TimeUtil.nowTime() + "，风险" + riskCount + "/" + links.size() + "，即将开始第" + (round + 1) + "轮 =====");
         int roundNo = round;
         int riskNo = riskCount;
@@ -336,6 +331,26 @@ public class ScreenshotView extends FrameLayout {
         UI.invokeLater(() -> AlertHelper.showBanner(
                 "第" + roundNo + "轮检测完成：共" + totalNo + "条，风险" + riskNo + "条\n即将开始下一轮...",
                 false));
+        LogHelper.e(TAG, "===== 第" + roundNo + "轮结束，风险" + riskNo + "/" + totalNo
+                + "，自动开启第" + (roundNo + 1) + "轮 =====");
+
+        // 每轮结束：推送轮次汇总到飞书群聊（配置了机器人地址时）
+        String webhook = UI.getMMKV().getString(
+                com.yaonan.util.global.Global.KEY_FEISHU_WEBHOOK, "");
+        String feishuSecret = UI.getMMKV().getString(
+                com.yaonan.util.global.Global.KEY_FEISHU_SECRET, "");
+        if (StringUtil.isNotEmpty(webhook)) {
+            String msg = "📋 链接检测第" + roundNo + "轮完成"
+                    + "\n检测链接：" + totalNo + "条"
+                    + "\n风险链接：" + riskNo + "条"
+                    + "\n时间：" + TimeUtil.nowTime()
+                    + "\n（即将开始第" + (roundNo + 1) + "轮）";
+            ThreadUtil.async(() -> {
+                boolean ok = FeishuHelper.sendText(webhook, msg, feishuSecret);
+                LogHelper.i(TAG, "飞书轮次汇总推送: " + (ok ? "成功" : "失败"));
+            });
+        }
+
         round++;
         ThreadUtil.sleep(stepMs());
         } // while(true) 一轮结束，自动开启下一轮
