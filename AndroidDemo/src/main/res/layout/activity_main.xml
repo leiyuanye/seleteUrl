@@ -214,7 +214,7 @@
                 android:text="选择" />
         </LinearLayout>
 
-        <!-- 卡片：检测设置（风险关键词 + 检查时长） -->
+        <!-- 卡片：检测设置（风险关键词 + 检查时长），默认隐藏，双击版本号显示/隐藏 -->
         <LinearLayout
             android:id="@+id/card_settings"
             android:layout_width="match_parent"
@@ -223,7 +223,8 @@
             android:background="@drawable/bg_card"
             android:padding="16dp"
             android:layout_marginBottom="12dp"
-            android:elevation="1dp">
+            android:elevation="1dp"
+            android:visibility="gone">
 
             <TextView
                 android:id="@+id/tv_settings_title"

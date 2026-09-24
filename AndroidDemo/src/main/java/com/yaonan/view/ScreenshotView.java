@@ -268,36 +268,50 @@ public class ScreenshotView extends FrameLayout {
                 i--; // 重试当前链接
                 continue;
             }
+            String resultLine;
+            boolean isRisk = false;
+            String keyword = "";
             if (checkRes.startsWith("risk")) {
+                isRisk = true;
+                keyword = checkRes.substring("risk:".length());
                 riskCount++;
-                String keyword = checkRes.substring("risk:".length());
-                appendResult("[风险-" + keyword + "] " + link);
+                resultLine = "[风险-" + keyword + "]";
+            } else if ("normal".equals(checkRes)) {
+                resultLine = "[正常]";
+            } else {
+                resultLine = "[异常-" + checkRes + "]";
+            }
+            appendResult(resultLine + " " + link);
+            final String keywordFinal = keyword;
+            if (isRisk) {
                 // 后台时Toast被系统限制，改用悬浮横幅醒目提醒
                 int total = links.size();
                 UI.invokeLater(() -> AlertHelper.showBanner(
                         "⚠️ 发现风险链接 " + index + "/" + total
-                                + "\n关键词：" + keyword
+                                + "\n关键词：" + keywordFinal
                                 + "\n" + link, true));
-                // 推送通知到飞书群聊（配置了机器人地址时），消息末尾@所有人
-                String webhook = UI.getMMKV().getString(
-                        com.yaonan.util.global.Global.KEY_FEISHU_WEBHOOK, "");
-                String feishuSecret = UI.getMMKV().getString(
-                        com.yaonan.util.global.Global.KEY_FEISHU_SECRET, "");
-                if (StringUtil.isNotEmpty(webhook)) {
-                    String msg = "⚠️ 链接检测发现风险链接(" + index + "/" + total + ")"
-                            + "\n关键词：" + keyword
-                            + "\n链接：" + link
-                            + "\n时间：" + TimeUtil.nowTime()
-                            + "\n<at user_id=\"all\">所有人</at>";
-                    ThreadUtil.async(() -> {
-                        boolean ok = FeishuHelper.sendText(webhook, msg, feishuSecret);
-                        LogHelper.i(TAG, "飞书风险推送: " + (ok ? "成功" : "失败"));
-                    });
-                }
-            } else if ("normal".equals(checkRes)) {
-                appendResult("[正常] " + link);
-            } else {
-                appendResult("[异常-" + checkRes + "] " + link);
+            }
+
+            // 推送通知到飞书群聊（配置了机器人地址时）：每条链接都通知，风险链接@所有人
+            String webhook = UI.getMMKV().getString(
+                    com.yaonan.util.global.Global.KEY_FEISHU_WEBHOOK, "");
+            String feishuSecret = UI.getMMKV().getString(
+                    com.yaonan.util.global.Global.KEY_FEISHU_SECRET, "");
+            if (StringUtil.isNotEmpty(webhook)) {
+                int roundNo = round;
+                int total = links.size();
+                String resultText = isRisk ? "⚠️ 风险-" + keyword
+                        : ("normal".equals(checkRes) ? "✅ 正常" : "❌ 异常-" + checkRes);
+                String atAll = isRisk ? "\n<at user_id=\"all\">所有人</at>" : "";
+                String msg = "【链接检测】第" + roundNo + "轮 " + index + "/" + total
+                        + "\n结果：" + resultText
+                        + "\n链接：" + link
+                        + "\n时间：" + TimeUtil.nowTime()
+                        + atAll;
+                ThreadUtil.async(() -> {
+                    boolean ok = FeishuHelper.sendText(webhook, msg, feishuSecret);
+                    LogHelper.i(TAG, "飞书推送(" + resultText + "): " + (ok ? "成功" : "失败"));
+                });
             }
 
             // 4、仅当打开过网页时才需要从网页返回聊天界面

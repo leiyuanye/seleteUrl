@@ -138,6 +138,17 @@ public class MainActivity extends AppCompatActivity {
         binding.btnSettingsSave.setOnClickListener(v -> saveSettings());
 
         // 运行日志：分享（通过微信/QQ等发送日志文件）
+        // 版本号按钮：500ms 内双击，显示/隐藏「检测设置」模块
+        binding.btnAbout.setOnClickListener(v -> {
+            long now = System.currentTimeMillis();
+            if (now - lastAboutClickTime < 500) {
+                boolean show = binding.cardSettings.getVisibility() != View.VISIBLE;
+                binding.cardSettings.setVisibility(show ? View.VISIBLE : View.GONE);
+                UI.alert(show ? "已显示检测设置" : "已隐藏检测设置", this);
+            }
+            lastAboutClickTime = now;
+        });
+
         binding.btnLogShare.setOnClickListener(v -> shareLogFile());
 
         // 运行日志：清空
