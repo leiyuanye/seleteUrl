@@ -272,6 +272,7 @@ public class SelectToSpeakService extends AccessibilityService {
                 ThreadUtil.sleep(1500);
                 if (isInputCleared(url)) {
                     LogHelper.e(TAG, "发送成功-节点点击(第" + attempt + "次尝试)");
+                    closeKeyboardIfOpen();
                     response(msgid, "success");
                     return;
                 }
@@ -282,6 +283,7 @@ public class SelectToSpeakService extends AccessibilityService {
                     ThreadUtil.sleep(1500);
                     if (isInputCleared(url)) {
                         LogHelper.e(TAG, "发送成功-OCR点击(第" + attempt + "次尝试)");
+                        closeKeyboardIfOpen();
                         response(msgid, "success");
                         return;
                     }
@@ -439,6 +441,8 @@ public class SelectToSpeakService extends AccessibilityService {
                 response(msgid, "nochat");
                 return;
             }
+            // 收起软键盘（若粘贴时弹出），否则滑动滚屏手势会落在键盘上失效
+            closeKeyboardIfOpen();
             // 1、OCR 在聊天列表中查找链接消息（消息气泡渲染有延迟，最多重试5次）
             // 先把聊天滚动到底部：无障碍粘贴发送不会触发微信自动滚动，
             // 聊天停留在历史位置时新消息在可视区之外，且会误点击旧消息（旧链接打不开或非本条）
@@ -569,6 +573,30 @@ public class SelectToSpeakService extends AccessibilityService {
             sec = Global.DEFAULT_STEP_INTERVAL_SEC;
         }
         return sec * 1000L;
+    }
+
+    /**
+     * 收起软键盘（若已弹出）。
+     *
+     * <p>判断依据：输入栏被顶到屏幕上半部（top < 80%屏高）说明软键盘已弹出，
+     * 此时按一次返回键收起键盘（仍停留在聊天界面）；输入栏在底部则不动作。</p>
+     *
+     * <p>用途：粘贴/输入会弹出软键盘，键盘不收起会拦截后续的滑动滚屏手势
+     * （手势落在键盘上会变成打字/误触）。</p>
+     */
+    private void closeKeyboardIfOpen() {
+        AccessibilityNodeInfo edit = findChatEditText();
+        if (edit == null) {
+            return;
+        }
+        Rect r = new Rect();
+        edit.getBoundsInScreen(r);
+        DisplayMetrics dm = WindowHelper.getRealMetrics();
+        if (!r.isEmpty() && r.top < dm.heightPixels * 0.8) {
+            performGlobalAction(GLOBAL_ACTION_BACK);
+            ThreadUtil.sleep(600);
+            LogHelper.e(TAG, "已收起软键盘");
+        }
     }
 
     /**
