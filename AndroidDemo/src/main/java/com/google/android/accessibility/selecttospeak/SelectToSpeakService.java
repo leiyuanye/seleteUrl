@@ -13,7 +13,6 @@ import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Display;
 import android.view.accessibility.AccessibilityEvent;
-import android.view.accessibility.AccessibilityWindowInfo;
 import android.view.accessibility.AccessibilityNodeInfo;
 
 import androidx.annotation.NonNull;
@@ -205,22 +204,70 @@ public class SelectToSpeakService extends AccessibilityService {
             editNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, clearArgs);
             ThreadUtil.sleep(400);
 
-                        // 3、方式一（老仓库验证过的方案）：SET_TEXT直填。
-            //    全程不聚焦不粘贴不弹键盘，活动窗口保持为微信本体，
-            //    "发送"按钮可通过节点搜索+ACTION_CLICK直接点击，不受输入法窗口干扰。
-            //    填入后等待2秒让微信渲染"发送"按钮，两轮节点点击+闭环校验
+            // 3、方式一：ACTION_FOCUS聚焦（不弹键盘、布局不变）+ 粘贴
+            //    粘贴走微信原生输入管线，等价于真实输入，会触发"发送"按钮显示
             editNode = findChatEditText();
-            if (editNode == null) {
-                LogHelper.e(TAG, "发送链接失败: 清空后输入框丢失");
-                response(msgid, "nochat");
+            if (editNode != null) {
+                editNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+                ThreadUtil.sleep(500);
+                editNode = findChatEditText();
+                if (editNode != null) {
+                    editNode.performAction(AccessibilityNodeInfo.ACTION_PASTE);
+                }
+            }
+            ThreadUtil.sleep(1000);
+
+            // 4、方式二：SET_TEXT直填（整框替换，天然防拼接）
+            if (!isInputExact(url)) {
+                LogHelper.e(TAG, "粘贴未生效，退回SET_TEXT方式");
+                editNode = findChatEditText();
+                if (editNode != null) {
+                    Bundle arguments = new Bundle();
+                    arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, url);
+                    editNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments);
+                    ThreadUtil.sleep(800);
+                }
+            }
+
+            // 5、方式三：坐标点击聚焦（弹键盘）+ 重新定位 + 粘贴
+            if (!isInputExact(url)) {
+                LogHelper.e(TAG, "SET_TEXT未生效，退回坐标点击+粘贴方式");
+                editNode = findChatEditText();
+                if (editNode != null) {
+                    Rect boxRect = new Rect();
+                    editNode.getBoundsInScreen(boxRect);
+                    _Tap(boxRect.centerX(), boxRect.centerY(), 50L, null);
+                    ThreadUtil.sleep(800);
+                    editNode = findChatEditText();
+                    if (editNode != null) {
+                        // 弹键盘后先清空再粘贴，防止聚焦时残留文本被追加
+                        Bundle clearArgs2 = new Bundle();
+                        clearArgs2.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "");
+                        editNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, clearArgs2);
+                        ThreadUtil.sleep(300);
+                        editNode = findChatEditText();
+                        if (editNode != null) {
+                            editNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+                            ThreadUtil.sleep(300);
+                            editNode.performAction(AccessibilityNodeInfo.ACTION_PASTE);
+                            ThreadUtil.sleep(1000);
+                        }
+                    }
+                }
+            }
+
+            // 6、最终校验：输入框内容必须恰好等于本条链接（防止残留文本拼接发送）
+            if (!isInputExact(url)) {
+                LogHelper.e(TAG, "发送链接失败: 输入框内容与链接不一致(可能存在残留拼接)");
+                response(msgid, "error");
                 return;
             }
-            Bundle arguments = new Bundle();
-            arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, url);
-            editNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments);
-            LogHelper.e(TAG, "SET_TEXT填入，等待发送按钮渲染...");
-            ThreadUtil.sleep(2000);
-            for (int attempt = 1; attempt <= 2; attempt++) {
+            LogHelper.e(TAG, "输入 " + url);
+
+            // 点击"发送"并验证：发送成功后微信会清空输入框，以此为准做闭环校验。
+            // 每轮两种方式：1无障碍节点点击；2截屏+OCR查找"发送"文字坐标后手势点击。
+            for (int attempt = 1; attempt <= 3; attempt++) {
+                // 方式1：无障碍节点点击
                 clickSendButton();
                 ThreadUtil.sleep(1500);
                 if (isInputCleared(url)) {
@@ -229,13 +276,8 @@ public class SelectToSpeakService extends AccessibilityService {
                     response(msgid, "success");
                     return;
                 }
-                if (attempt == 1) {
-                    ThreadUtil.sleep(2000); // 再给2s渲染时间
-                }
-            }
 
-            // 4、方式二：OCR点击"发送"（节点文本被微信8.0.52+混淆时的兜底；无键盘全屏OCR）
-            for (int attempt = 1; attempt <= 2; attempt++) {
+                // 方式2：截屏 + OCR 查找"发送"文字坐标，手势点击
                 if (ocrTapText("发送")) {
                     LogHelper.e(TAG, "OCR已点击发送(第" + attempt + "次尝试)");
                     ThreadUtil.sleep(1500);
@@ -246,41 +288,11 @@ public class SelectToSpeakService extends AccessibilityService {
                         return;
                     }
                 }
-                ThreadUtil.sleep(1500);
+                LogHelper.e(TAG, "发送未生效(第" + attempt + "次尝试)，重试");
             }
 
-            // 5、方式三（兜底）：粘贴路径——会弹软键盘，OCR点击后收起键盘。
-            //    粘贴走微信原生输入管线；弹键盘后先清空再粘贴防拼接
-            editNode = findChatEditText();
-            if (editNode != null) {
-                editNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
-                ThreadUtil.sleep(500);
-                editNode = findChatEditText();
-                if (editNode != null) {
-                    editNode.performAction(AccessibilityNodeInfo.ACTION_PASTE);
-                    ThreadUtil.sleep(1000);
-                }
-                for (int attempt = 1; attempt <= 2; attempt++) {
-                    if (ocrTapText("发送")) {
-                        ThreadUtil.sleep(1500);
-                        if (isInputCleared(url)) {
-                            LogHelper.e(TAG, "发送成功-粘贴+OCR点击(第" + attempt + "次尝试)");
-                            closeKeyboardIfOpen();
-                            response(msgid, "success");
-                            return;
-                        }
-                    } else {
-                        break;
-                    }
-                }
-            }
-
-            // 6、失败：记录输入框当前内容（若可见），主循环按发送失败处理
-            editNode = findChatEditText();
-            LogHelper.e(TAG, "发送链接失败: 各方式均未成功, 输入框="
-                    + (editNode == null ? "null" : editNode.getText() + ""));
+            LogHelper.e(TAG, "发送链接失败: 多次尝试后输入框仍未清空");
             response(msgid, "error");
-            return;
         } catch (Exception e) {
             LogHelper.e(TAG, "发送链接异常: " + e.getMessage());
             ExceptionUtil.getStackTrace(e);
@@ -360,63 +372,53 @@ public class SelectToSpeakService extends AccessibilityService {
     }
 
     /**
-     * 点击"发送"按钮：遍历全部窗口（活动窗口可能被输入法抢占），
-     * 不依赖控件类型，文本为"发送"即可；节点可点击时执行 ACTION_CLICK，
-     * 否则按节点中心坐标手势点击。找不到时输出候选节点诊断信息。
+     * 点击"发送"按钮：不依赖控件类型与精确文本（"发送"/含"发送"均尝试），
+     * 优先节点 ACTION_CLICK，否则按节点中心坐标手势点击。
+     * 找不到时输出所有含"发送"文本的节点诊断信息，便于定位按钮特征。
      */
     private void clickSendButton() {
-        List<AccessibilityNodeInfo> roots = new ArrayList<>();
-        java.util.Set<Integer> seen = new java.util.HashSet<>();
-        AccessibilityNodeInfo active = getRootInActiveWindow();
-        if (active != null) {
-            roots.add(active);
-            seen.add(active.getWindowId());
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) {
+            LogHelper.e(TAG, "点击发送失败: 无活动窗口");
+            return;
         }
-        for (AccessibilityWindowInfo window : getWindows()) {
-            AccessibilityNodeInfo root = window.getRoot();
-            if (root != null && !seen.contains(window.getId())) {
-                seen.add(window.getId());
-                roots.add(root);
+        List<AccessibilityNodeInfo> sendNodes = root.findAccessibilityNodeInfosByText("发送");
+        AccessibilityNodeInfo fallback = null;
+        Rect fallbackRect = null;
+        StringBuilder diag = new StringBuilder();
+        for (AccessibilityNodeInfo node : sendNodes) {
+            String text = node.getText() + "";
+            Rect rect = new Rect();
+            node.getBoundsInScreen(rect);
+            if (diag.length() > 0) {
+                diag.append(" | ");
             }
-        }
-        for (AccessibilityNodeInfo root : roots) {
-            List<AccessibilityNodeInfo> sendNodes = root.findAccessibilityNodeInfosByText("发送");
-            AccessibilityNodeInfo fallback = null;
-            Rect fallbackRect = null;
-            StringBuilder diag = new StringBuilder();
-            for (AccessibilityNodeInfo node : sendNodes) {
-                String text = node.getText() + "";
-                Rect rect = new Rect();
-                node.getBoundsInScreen(rect);
-                if (diag.length() > 0) {
-                    diag.append(" | ");
-                }
-                diag.append(text).append(rect).append(node.getClassName());
-                if (rect.isEmpty()) {
-                    continue;
-                }
-                if ("发送".equals(text.trim())) {
-                    if (node.isClickable()) {
-                        node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                        LogHelper.e(TAG, "点击 发送(click) " + rect);
-                    } else {
-                        _Tap(rect.centerX(), rect.centerY(), 100L, null);
-                        LogHelper.e(TAG, "点击 发送(tap) " + rect);
-                    }
-                    return;
-                }
-                if (fallback == null) {
-                    fallback = node;
-                    fallbackRect = rect;
-                }
+            diag.append(text).append(rect).append(node.getClassName());
+            if (rect.isEmpty()) {
+                continue;
             }
-            if (fallback != null && fallbackRect != null) {
-                _Tap(fallbackRect.centerX(), fallbackRect.centerY(), 100L, null);
-                LogHelper.e(TAG, "点击 发送(候选tap) " + fallbackRect + " " + (fallback.getText() + ""));
+            if ("发送".equals(text.trim())) {
+                if (node.isClickable()) {
+                    node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                    LogHelper.e(TAG, "点击 发送(click) " + rect);
+                } else {
+                    _Tap(rect.centerX(), rect.centerY(), 100L, null);
+                    LogHelper.e(TAG, "点击 发送(tap) " + rect);
+                }
                 return;
             }
+            if (fallback == null) {
+                fallback = node;
+                fallbackRect = rect;
+            }
         }
-        LogHelper.e(TAG, "点击发送失败: 各窗口均未找到发送按钮");
+        // 无精确"发送"时，点击含"发送"文本的候选节点（按坐标）
+        if (fallback != null && fallbackRect != null) {
+            _Tap(fallbackRect.centerX(), fallbackRect.centerY(), 100L, null);
+            LogHelper.e(TAG, "点击 发送(候选tap) " + fallbackRect + " " + (fallback.getText() + ""));
+            return;
+        }
+        LogHelper.e(TAG, "点击发送失败: 未找到发送按钮, 候选节点[" + diag + "]");
     }
 
     /**
