@@ -198,16 +198,27 @@ public class SelectToSpeakService extends AccessibilityService {
                 return;
             }
 
-            // 2、方式一：ACTION_FOCUS聚焦（不弹键盘、布局不变）+ 粘贴
+            // 2、清空输入框残留：上一条链接若发送失败，残留文本会与本条粘贴拼接发送
+            Bundle clearArgs = new Bundle();
+            clearArgs.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "");
+            editNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, clearArgs);
+            ThreadUtil.sleep(400);
+
+            // 3、方式一：ACTION_FOCUS聚焦（不弹键盘、布局不变）+ 粘贴
             //    粘贴走微信原生输入管线，等价于真实输入，会触发"发送"按钮显示
-            editNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
-            ThreadUtil.sleep(500);
-            boolean pasted = editNode.performAction(AccessibilityNodeInfo.ACTION_PASTE);
-            LogHelper.e(TAG, "粘贴动作: " + pasted);
+            editNode = findChatEditText();
+            if (editNode != null) {
+                editNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+                ThreadUtil.sleep(500);
+                editNode = findChatEditText();
+                if (editNode != null) {
+                    editNode.performAction(AccessibilityNodeInfo.ACTION_PASTE);
+                }
+            }
             ThreadUtil.sleep(1000);
 
-            // 3、方式二：SET_TEXT直填
-            if (!isInputFilled(url)) {
+            // 4、方式二：SET_TEXT直填（整框替换，天然防拼接）
+            if (!isInputExact(url)) {
                 LogHelper.e(TAG, "粘贴未生效，退回SET_TEXT方式");
                 editNode = findChatEditText();
                 if (editNode != null) {
@@ -218,8 +229,8 @@ public class SelectToSpeakService extends AccessibilityService {
                 }
             }
 
-            // 4、方式三：坐标点击聚焦（弹键盘）+ 重新定位 + 粘贴
-            if (!isInputFilled(url)) {
+            // 5、方式三：坐标点击聚焦（弹键盘）+ 重新定位 + 粘贴
+            if (!isInputExact(url)) {
                 LogHelper.e(TAG, "SET_TEXT未生效，退回坐标点击+粘贴方式");
                 editNode = findChatEditText();
                 if (editNode != null) {
@@ -229,16 +240,25 @@ public class SelectToSpeakService extends AccessibilityService {
                     ThreadUtil.sleep(800);
                     editNode = findChatEditText();
                     if (editNode != null) {
-                        editNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+                        // 弹键盘后先清空再粘贴，防止聚焦时残留文本被追加
+                        Bundle clearArgs2 = new Bundle();
+                        clearArgs2.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "");
+                        editNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, clearArgs2);
                         ThreadUtil.sleep(300);
-                        editNode.performAction(AccessibilityNodeInfo.ACTION_PASTE);
-                        ThreadUtil.sleep(1000);
+                        editNode = findChatEditText();
+                        if (editNode != null) {
+                            editNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+                            ThreadUtil.sleep(300);
+                            editNode.performAction(AccessibilityNodeInfo.ACTION_PASTE);
+                            ThreadUtil.sleep(1000);
+                        }
                     }
                 }
             }
 
-            if (!isInputFilled(url)) {
-                LogHelper.e(TAG, "发送链接失败: 三种方式均未能填入链接");
+            // 6、最终校验：输入框内容必须恰好等于本条链接（防止残留文本拼接发送）
+            if (!isInputExact(url)) {
+                LogHelper.e(TAG, "发送链接失败: 输入框内容与链接不一致(可能存在残留拼接)");
                 response(msgid, "error");
                 return;
             }
@@ -302,17 +322,20 @@ public class SelectToSpeakService extends AccessibilityService {
     }
 
     /**
-     * 验证输入框中是否已填入该链接。
+     * 验证输入框内容是否恰好等于该链接（trim后全等）。
+     *
+     * <p>用全等而非contains：粘贴是追加语义，若输入框有残留文本，
+     * contains会误判通过导致两条链接拼接发送。</p>
      *
      * @param url 链接
-     * @return 是否已填入
+     * @return 是否恰好填入该链接
      */
-    private boolean isInputFilled(String url) {
+    private boolean isInputExact(String url) {
         AccessibilityNodeInfo edit = findChatEditText();
         if (edit == null) {
             return false;
         }
-        return (edit.getText() + "").contains(url);
+        return ((edit.getText() + "").trim()).equals(url);
     }
 
     /**
