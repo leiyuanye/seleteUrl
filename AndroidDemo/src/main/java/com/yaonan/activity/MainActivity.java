@@ -143,13 +143,27 @@ public class MainActivity extends AppCompatActivity {
         binding.btnSettingsSave.setOnClickListener(v -> saveSettings());
 
         // 运行日志：分享（通过微信/QQ等发送日志文件）
-        // 版本号按钮：500ms 内双击，显示/隐藏「检测设置」模块
+        // 检测设置：默认折叠，点击标题展开/收起
+        binding.cardSettings.setOnClickListener(v -> {
+            boolean show = binding.settingsBody.getVisibility() != View.VISIBLE;
+            binding.settingsBody.setVisibility(show ? View.VISIBLE : View.GONE);
+            binding.tvSettingsTitle.setText(show
+                    ? "检测设置（点击展开/收起）▾" : "检测设置（点击展开/收起）▸");
+        });
+
+        // 版本号按钮：500ms 内双击，打开下载链接获取服务器最新安装包
         binding.btnAbout.setOnClickListener(v -> {
             long now = System.currentTimeMillis();
             if (now - lastAboutClickTime < 500) {
-                boolean show = binding.cardSettings.getVisibility() != View.VISIBLE;
-                binding.cardSettings.setVisibility(show ? View.VISIBLE : View.GONE);
-                UI.alert(show ? "已显示检测设置" : "已隐藏检测设置", this);
+                String updateUrl = "http://t2.tuielf.com/AndroidDemo-debug.apk";
+                try {
+                    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(updateUrl));
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(intent);
+                    UI.alert("正在打开下载链接...", this);
+                } catch (Exception e) {
+                    UI.alert("打开下载链接失败", this);
+                }
             }
             lastAboutClickTime = now;
         });

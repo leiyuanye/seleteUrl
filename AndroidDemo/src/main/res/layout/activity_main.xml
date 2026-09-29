@@ -235,17 +235,24 @@
             android:background="@drawable/bg_card"
             android:padding="16dp"
             android:layout_marginBottom="12dp"
-            android:elevation="1dp"
-            android:visibility="gone">
+            android:elevation="1dp">
 
             <TextView
                 android:id="@+id/tv_settings_title"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="检测设置"
+                android:text="检测设置（点击展开/收起）▸"
                 android:textColor="@color/text_primary"
                 android:textSize="15sp"
                 android:textStyle="bold" />
+
+            <!-- 折叠体：默认收起，点击标题展开 -->
+            <LinearLayout
+                android:id="@+id/settings_body"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
 
             <TextView
                 android:id="@+id/tv_feishu_label"
@@ -369,6 +376,8 @@
                     android:layout_marginStart="12dp"
                     android:text="保存" />
             </LinearLayout>
+
+            </LinearLayout>
         </LinearLayout>
 
         <!-- 使用说明卡片 -->
@@ -450,7 +459,7 @@
             <Button
                     android:id="@+id/btn_about"
                     style="@style/BtnDisabled"
-                    android:text="linkcheck1.8" />
+                    android:text="linkcheck1.9" />
 
             <LinearLayout
                 android:layout_width="0dp"
