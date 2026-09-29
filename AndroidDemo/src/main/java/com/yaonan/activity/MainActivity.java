@@ -117,13 +117,18 @@ public class MainActivity extends AppCompatActivity {
             startActivity(intent);
         });
 
-        // 选择TXT文件（每行一条链接）
+        // 选择TXT文件（每行一条链接），同时申请读写权限（供软件内编辑保存）
         binding.btnPickFile.setOnClickListener(v -> {
             Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
             intent.setType("text/*");
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
             startActivityForResult(intent, REQ_PICK_TXT);
         });
+
+        // 编辑文件内容：直接在软件内编辑链接列表，保存回原文件
+        binding.btnEditFile.setOnClickListener(v -> showFileEditor());
 
         // 检测设置：飞书机器人地址 + 密钥 + 风险关键词摘要（点击编辑）+ 检查时长
         binding.etFeishuWebhook.setText(kv.getString(com.yaonan.util.global.Global.KEY_FEISHU_WEBHOOK, ""));
@@ -170,9 +175,10 @@ public class MainActivity extends AppCompatActivity {
         if (requestCode == REQ_PICK_TXT && resultCode == RESULT_OK && data != null && data.getData() != null) {
             Uri uri = data.getData();
             try {
-                // 持久化读取权限，重启应用后仍可读取
+                // 持久化读写权限，重启应用后仍可读取和编辑保存
                 App.getApp().getContentResolver().takePersistableUriPermission(
-                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
             } catch (Exception e) {
                 LogHelper.e(TAG, "takePersistableUriPermission失败: " + e.getMessage());
             }
@@ -203,6 +209,45 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) {
             UI.alert("分享失败: " + e.getMessage(), this);
         }
+    }
+
+    /**
+     * 文本编辑对话框：查看/编辑所选TXT文件内容，保存时写回原文件。
+     * 让不熟悉文件操作的用户直接在软件内维护链接列表。
+     */
+    private void showFileEditor() {
+        String uriStr = UI.getMMKV().getString(KEY_LINKS_URI, "");
+        if (StringUtil.isEmpty(uriStr)) {
+            UI.alert("请先点击「选择」选择TXT文件", this);
+            return;
+        }
+        Uri uri = Uri.parse(uriStr);
+        String content = ScreenshotView.readRawText(uri);
+
+        final EditText input = new EditText(this);
+        input.setText(content);
+        input.setMinLines(14);
+        input.setGravity(Gravity.TOP);
+        input.setTextSize(13);
+        input.setSelection(content.length());
+
+        new AlertDialog.Builder(this)
+                .setTitle("编辑文件内容（每行一条链接）")
+                .setView(input)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("保存", (dialog, which) -> {
+                    String text = input.getText() == null ? "" : input.getText().toString();
+                    boolean ok = ScreenshotView.writeRawText(uri, text);
+                    if (ok) {
+                        int count = ScreenshotView.readLinks(uri).size();
+                        LogHelper.i(TAG, "文件已编辑保存: " + count + "条链接");
+                        UI.alert("已保存，共" + count + "条链接", this);
+                        refreshFileCount();
+                    } else {
+                        UI.alert("保存失败：该文件不支持写入，请重新选择文件", this);
+                    }
+                })
+                .show();
     }
 
     /**
@@ -437,6 +482,8 @@ public class MainActivity extends AppCompatActivity {
         binding.btnStartA.setTextColor(Color.WHITE);
         binding.btnPickFile.setBackgroundResource(R.drawable.bg_ha_btn_primary);
         binding.btnPickFile.setTextColor(Color.WHITE);
+        binding.btnEditFile.setBackgroundResource(R.drawable.bg_ha_btn_primary);
+        binding.btnEditFile.setTextColor(Color.WHITE);
     }
 
     /**
@@ -525,6 +572,8 @@ public class MainActivity extends AppCompatActivity {
         binding.btnStartA.setTextColor(Color.WHITE);
         binding.btnPickFile.setBackgroundResource(R.drawable.bg_btn_primary);
         binding.btnPickFile.setTextColor(Color.WHITE);
+        binding.btnEditFile.setBackgroundResource(R.drawable.bg_btn_primary);
+        binding.btnEditFile.setTextColor(Color.WHITE);
     }
 
     /**

@@ -208,10 +208,22 @@
                 </LinearLayout>
             </LinearLayout>
 
-            <Button
-                android:id="@+id/btn_pick_file"
-                style="@style/BtnPrimary"
-                android:text="选择" />
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btn_pick_file"
+                    style="@style/BtnPrimary"
+                    android:text="选择" />
+
+                <Button
+                    android:id="@+id/btn_edit_file"
+                    style="@style/BtnPrimary"
+                    android:layout_marginStart="8dp"
+                    android:text="编辑" />
+            </LinearLayout>
         </LinearLayout>
 
         <!-- 卡片：检测设置（风险关键词 + 检查时长），默认隐藏，双击版本号显示/隐藏 -->
@@ -438,7 +450,7 @@
             <Button
                     android:id="@+id/btn_about"
                     style="@style/BtnDisabled"
-                    android:text="linkcheck1.7" />
+                    android:text="linkcheck1.8" />
 
             <LinearLayout
                 android:layout_width="0dp"

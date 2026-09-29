@@ -357,6 +357,53 @@ public class ScreenshotView extends FrameLayout {
     }
 
     /**
+     * 读取 TXT 文件的原始文本内容（UTF-8）。
+     *
+     * @param uri TXT 文件的 content:// Uri
+     * @return 文件全部文本（读取失败返回空串）
+     */
+    public static String readRawText(Uri uri) {
+        try (InputStream is = App.getApp().getContentResolver().openInputStream(uri)) {
+            if (is == null) {
+                return "";
+            }
+            byte[] bytes = new byte[is.available()];
+            int read = is.read(bytes);
+            if (read <= 0) {
+                return "";
+            }
+            return new String(bytes, 0, read, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            LogHelper.e(TAG, "读取TXT失败");
+            ExceptionUtil.getStackTrace(e);
+            return "";
+        }
+    }
+
+    /**
+     * 将文本写回 TXT 文件（覆盖原内容，UTF-8）。
+     *
+     * @param uri  TXT 文件的 content:// Uri（需有写权限）
+     * @param text 写入的文本
+     * @return 是否写入成功
+     */
+    public static boolean writeRawText(Uri uri, String text) {
+        try (java.io.OutputStream os = App.getApp().getContentResolver().openOutputStream(uri, "wt")) {
+            if (os == null) {
+                return false;
+            }
+            os.write((text == null ? "" : text).getBytes(StandardCharsets.UTF_8));
+            os.flush();
+            LogHelper.i(TAG, "写入TXT成功: " + (text == null ? 0 : text.length()) + "字");
+            return true;
+        } catch (Exception e) {
+            LogHelper.e(TAG, "写入TXT失败");
+            ExceptionUtil.getStackTrace(e);
+            return false;
+        }
+    }
+
+    /**
      * 读取 TXT 文件中的链接（每行一条，仅保留 http/https 开头的行，自动去除首尾空白）。
      *
      * @param uri TXT 文件的 content:// Uri
@@ -364,25 +411,12 @@ public class ScreenshotView extends FrameLayout {
      */
     public static List<String> readLinks(Uri uri) {
         List<String> links = new ArrayList<>();
-        try (InputStream is = App.getApp().getContentResolver().openInputStream(uri)) {
-            if (is == null) {
-                return links;
+        String content = readRawText(uri);
+        for (String line : content.split("\n")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+                links.add(trimmed);
             }
-            byte[] bytes = new byte[is.available()];
-            int read = is.read(bytes);
-            if (read <= 0) {
-                return links;
-            }
-            String content = new String(bytes, 0, read, StandardCharsets.UTF_8);
-            for (String line : content.split("\n")) {
-                String trimmed = line.trim();
-                if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-                    links.add(trimmed);
-                }
-            }
-        } catch (Exception e) {
-            LogHelper.e(TAG, "读取TXT失败");
-            ExceptionUtil.getStackTrace(e);
         }
         return links;
     }
